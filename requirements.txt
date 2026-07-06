@@ -15,9 +15,11 @@ numpy>=1.24.3
 igraph>=0.11.3
 leidenalg>=0.10.2
 
-# AI APIs
-google-generativeai>=0.3.0
+# AI APIs ("bring your own LLM" - see src/llm/client.py; default provider is
+# Anthropic, openai covers OpenAI itself + any OpenAI-compatible endpoint:
+# OpenRouter, local Ollama, LM Studio, ...)
 anthropic>=0.18.0
+openai>=1.0.0
 
 # Utilities
 python-dotenv>=1.0.0

@@ -27,6 +27,11 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))
 
 from rich.console import Console
+import sys as _sys, pathlib as _pl
+_ROOT = str(_pl.Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
+
 from src.config import DATABASE_PATH, DATA_DIR, TRAILS_DIR
 
 console = Console()

@@ -3,6 +3,11 @@
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 
+import sys as _sys, pathlib as _pl
+_ROOT = str(_pl.Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
+
 from src.extraction.topic_extractor import TopicExtractor
 from src.extraction.usefulness_filter import UsefulnessFilter
 from src.database.operations import get_db
@@ -127,7 +132,7 @@ def main():
 
     # Confirm
     console.print(f"\n[bold]Ready to extract topics for {len(books_without_topics)} books[/bold]")
-    console.print(f"[dim]Estimated cost: ~${len(books_without_topics) * 0.01:.2f} (Gemini Flash Lite)[/dim]")
+    console.print(f"[dim]Estimated cost: ~${len(books_without_topics) * 0.01:.2f} (configured LLM)[/dim]")
     console.print(f"[dim]Estimated time: ~{len(books_without_topics) * 1.5:.0f} minutes[/dim]\n")
 
     response = input("Continue? (yes/no): ")

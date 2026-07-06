@@ -1,10 +1,10 @@
 """Ideation Agent - Proposes novel trail ideas using underexplored topics"""
 
 from typing import List, Dict, Optional
-import anthropic
 
 from src.database.operations import get_db
-from src.config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TRAILS_DIR
+from src.config import TRAILS_DIR
+from src.llm.client import get_client
 from src.agent.trail_constraints import (
     build_existing_trail_corpus,
     count_excerpt_appearances,
@@ -23,21 +23,22 @@ class IdeationAgent:
     Workflow:
     1. Query novel topics (90th percentile novelty threshold)
     2. Get book metadata for context
-    3. Use Claude to propose 5+ diverse trail ideas
+    3. Use the configured LLM to propose 5+ diverse trail ideas
     4. Return structured trail proposals
     """
 
-    def __init__(self, model: str = CLAUDE_MODEL, percentile: int = 90, num_ideas: int = 5):
+    def __init__(self, model: str = None, percentile: int = 90, num_ideas: int = 5):
         """
         Initialize ideation agent
 
         Args:
-            model: Claude model to use (default: opus-4-6)
+            model: Optional LLM model override (defaults to the configured
+                LLM_MODEL - see src/llm/client.py)
             percentile: Novelty percentile threshold (default: 90th)
             num_ideas: Number of trail ideas to generate (default: 5)
         """
-        self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        self.model = model
+        self.client = get_client(model=model)
+        self.model = self.client.model
         self.percentile = percentile
         self.num_ideas = num_ideas
 
@@ -47,7 +48,7 @@ class IdeationAgent:
         FRESH excerpts (not already mined to the cross-trail reuse cap).
 
         Raw novelty alone is misleading on a mature library: the highest-novelty
-        topics (rare, vivid — "andon cord", "xerox parc") are precisely the ones
+        topics (rare, vivid proper nouns and niche jargon) are precisely the ones
         existing trails have already exhausted, so proposing them guarantees a
         downstream reuse-cap rejection. We over-fetch the novel pool, then keep
         only topics that still have at least one under-cap chunk, scanning the
@@ -75,8 +76,8 @@ class IdeationAgent:
             # A trail needs >= MIN_BOOK_SPAN distinct books (the quality gate's
             # minimum_book_diversity check). Topics that occur in fewer books can
             # never anchor a passing trail, no matter how novel — extreme novelty
-            # is dominated by frequency-1 hapax noise ("longaberger baskets") that
-            # spans a single book. So we require book-span at the SQL level and
+            # is dominated by frequency-1 hapax noise (a rare term that only ever
+            # appears in a single book). So we require book-span at the SQL level and
             # rank by novelty within the trail-able set.
             MIN_BOOK_SPAN = 4
 
@@ -188,7 +189,7 @@ class IdeationAgent:
 
     def generate_ideas(self, user_idea: Optional[str] = None) -> List[Dict]:
         """
-        Generate trail ideas using Claude
+        Generate trail ideas using the configured LLM
 
         Args:
             user_idea: Optional user-provided trail idea (if None, auto-generate)
@@ -225,9 +226,6 @@ Propose {self.num_ideas} diverse trail ideas. Each trail should:
 - Provide unique cross-book synthesis
 
 # Constraints on framing:
-- AVOID the Toyota "andon cord" metaphor as a framing device — it has been the
-  through-line for too many existing trails and is over-explored. Do not put
-  "andon cord" in any title, description, or rationale.
 - Avoid leaning on any single recurring metaphor across all proposals. Each
   trail should reach for a distinct organizing image.
 - Prefer specific, vivid framings over generic abstractions ("architecture of X",
@@ -249,19 +247,11 @@ Propose {self.num_ideas} diverse trail ideas. Each trail should:
 
 Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
-        # Call Claude
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=2000,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
-        )
+        # Call the configured LLM
+        response_text = self.client.complete("", prompt, max_tokens=2000)
 
         # Parse response
         import json
-        response_text = message.content[0].text
 
         # Handle markdown code blocks if present
         if "```json" in response_text:
@@ -273,7 +263,7 @@ Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
         trails = data.get("trails", [])
 
         if not trails:
-            raise ValueError("No trail ideas returned from Claude")
+            raise ValueError("No trail ideas returned from the LLM")
 
         return trails
 
@@ -313,21 +303,16 @@ excerpts across multiple books, {anchor_line}.
 Write a concise, vivid TITLE and a 1-2 sentence DESCRIPTION for this trail. The
 title should evoke the cross-book theme, not name the anchor book directly.
 Prefer specific, concrete framings over generic abstractions ("architecture of X",
-"anatomy of Y"). Do NOT use the Toyota "andon cord" metaphor.
+"anatomy of Y").
 
 # Output Format (JSON):
 {{"title": "...", "description": "..."}}
 
 Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        response_text = self.client.complete("", prompt, max_tokens=500)
 
         import json
-        response_text = message.content[0].text
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0].strip()
         elif "```" in response_text:

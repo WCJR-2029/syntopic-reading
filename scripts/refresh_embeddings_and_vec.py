@@ -11,6 +11,11 @@ built on, so there is no dimension/model drift. Then it repopulates vec_topics
 """
 
 from rich.console import Console
+import sys as _sys, pathlib as _pl
+_ROOT = str(_pl.Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
+
 from src.database.operations import get_db
 from src.database.vector_store import setup_vector_store
 from src.embeddings.embedding_model import EmbeddingModel

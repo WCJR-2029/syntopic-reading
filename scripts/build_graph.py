@@ -2,6 +2,11 @@
 
 from rich.console import Console
 
+import sys as _sys, pathlib as _pl
+_ROOT = str(_pl.Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
+
 from src.database.operations import get_db
 from src.graph.cooccurrence import build_cooccurrence_edges
 from src.graph.topic_graph import build_topic_graph

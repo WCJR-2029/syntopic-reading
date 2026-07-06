@@ -35,6 +35,11 @@ import argparse
 import json
 import sys
 
+import sys as _sys, pathlib as _pl
+_ROOT = str(_pl.Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
+
 from src.agent import anchored_retrieval as ar
 
 

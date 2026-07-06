@@ -1,9 +1,8 @@
 """Polish Agent - Adds highlights, formatting, and connection notes"""
 
-from typing import List, Dict
-import anthropic
+from typing import List, Dict, Optional
 
-from src.config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from src.llm.client import get_client
 
 
 class PolishAgent:
@@ -17,15 +16,16 @@ class PolishAgent:
     4. Add metadata (books, topics, excerpt count)
     """
 
-    def __init__(self, model: str = CLAUDE_MODEL):
+    def __init__(self, model: str = None):
         """
         Initialize polish agent
 
         Args:
-            model: Claude model to use (default: opus-4-6)
+            model: Optional LLM model override (defaults to the configured
+                LLM_MODEL - see src/llm/client.py)
         """
-        self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        self.model = model
+        self.client = get_client(model=model)
+        self.model = self.client.model
 
     def add_highlights_and_connections(self, trail_idea: Dict, excerpts: List[Dict]) -> List[Dict]:
         """
@@ -78,19 +78,15 @@ For each excerpt:
 
 Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
-        # Call Claude
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=3000,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
-        )
+        # Call the configured LLM. max_tokens has headroom above 3000 (the previous
+        # value) because a full 10-excerpt trail's highlights/setting/connection JSON
+        # can run long enough to get truncated mid-object on some models, which would
+        # otherwise surface as an opaque json.loads crash at this, the final and most
+        # expensive stage of trail generation.
+        response_text = self.client.complete("", prompt, max_tokens=4096)
 
         # Parse response
         import json
-        response_text = message.content[0].text
 
         # Handle markdown code blocks
         if "```json" in response_text:
@@ -98,7 +94,13 @@ Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
         elif "```" in response_text:
             response_text = response_text.split("```")[1].split("```")[0].strip()
 
-        data = json.loads(response_text)
+        try:
+            data = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Polish agent: failed to parse the LLM's JSON response ({e}). "
+                f"Response (possibly truncated): {response_text[:500]}"
+            ) from e
         polished = data.get("polished_excerpts", [])
 
         # Merge polish data back into excerpts
@@ -120,13 +122,86 @@ Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
         return polished_excerpts
 
-    def format_trail_markdown(self, trail_idea: Dict, polished_excerpts: List[Dict]) -> str:
+    def generate_synthesis(self, trail_idea: Dict, polished_excerpts: List[Dict]) -> str:
+        """
+        Generate a DRAFT synthesis of what the trail's books, read together,
+        conclude about the trail's theme/question — a single LLM call made
+        AFTER the excerpts + connection notes are assembled.
+
+        This is deliberately provisional scaffolding, not a finished verdict:
+        the tool's philosophy is that a trail is worthless until the reader's
+        own live question enters the loop, so the synthesis must read as a
+        draft argument to argue with, not a conclusion to accept.
+
+        Args:
+            trail_idea: Trail idea dict with title, description
+            polished_excerpts: List of polished excerpts (post add_highlights_and_connections),
+                each with book_title, author, text, connection_note
+
+        Returns:
+            2-3 paragraph draft synthesis (plain prose, no headers)
+        """
+        prompt = f"""You are drafting a PROVISIONAL synthesis for a syntopic reading trail —
+a sequence of excerpts from different books, sequenced to trace one theme/question.
+
+# Trail Theme / Question:
+Title: {trail_idea['title']}
+Description: {trail_idea['description']}
+
+# Ordered Excerpts and Their Connection Notes:
+"""
+
+        for excerpt in polished_excerpts:
+            prompt += (
+                f"\n[Excerpt {excerpt['sequence_order']}] \"{excerpt['book_title']}\" "
+                f"by {excerpt['author']}\n"
+            )
+            prompt += f"Text: {excerpt['text']}\n"
+            prompt += f"Connection note: {excerpt.get('connection_note', '')}\n"
+
+        prompt += """
+
+# Task:
+Write a DRAFT synthesis, 2-3 paragraphs, of what these books — READ TOGETHER, in this
+order — actually argue about the theme/question above.
+
+Hard requirements:
+1. This is a PROVISIONAL ARGUMENT to be refined, NOT a final verdict. Use hedged,
+   working-draft language ("one reading here is...", "taken together these suggest...",
+   "a case emerges that...") rather than declarative, settled claims.
+2. Argue from how the books CONNECT to each other — where they agree, extend, tension
+   against, or contradict one another — not a book-by-book summary. A reader should not
+   be able to reconstruct this from reading each connection note in isolation; it must
+   synthesize across them.
+3. Do not resolve every tension you raise. Leave at least one open thread the reader
+   would need to work out for themselves — the synthesis is a starting point for the
+   reader's own thinking, not a closed loop.
+4. No headers, no bullet points, no meta-commentary about being an AI or about this
+   being a draft — just the prose itself; its provisional character should come through
+   in the language, not a disclaimer bolted onto it.
+
+Return ONLY the synthesis prose (2-3 paragraphs) — nothing else."""
+
+        # NOTE: no explicit `temperature=` override — this codebase's convention (every
+        # other call site) is to rely on the client's default (1.0), since at least one
+        # configured model (claude-sonnet-5) rejects any other value as a 400 (extended
+        # thinking requires temperature=1). max_tokens has headroom above the requested
+        # 2-3 paragraphs for models that lead with a thinking block.
+        synthesis = self.client.complete("", prompt, max_tokens=1500)
+        return synthesis.strip()
+
+    def format_trail_markdown(self, trail_idea: Dict, polished_excerpts: List[Dict],
+                               synthesis: Optional[str] = None) -> str:
         """
         Format trail as publishable markdown
 
         Args:
             trail_idea: Trail idea dict
             polished_excerpts: List of polished excerpts
+            synthesis: Optional draft synthesis text (see generate_synthesis). When
+                provided, rendered as a "## The synthesis (draft)" section after the
+                last excerpt and before the generated-by footer. Omitted entirely when
+                None (e.g. --no-synthesis), preserving the pre-synthesis markdown shape.
 
         Returns:
             Formatted markdown string
@@ -188,6 +263,15 @@ Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
             md += f"> {text}\n\n"
 
+        # Synthesis (draft) — optional, sits after the last excerpt and before the
+        # generated-by footer. Omitted entirely when synthesis is None.
+        if synthesis:
+            md += "---\n\n"
+            md += "## The synthesis (draft)\n\n"
+            md += ("*A starting point to argue with and refine - the tool surfaces the "
+                   "connections; the conclusion is yours.*\n\n")
+            md += f"{synthesis}\n\n"
+
         # Footer
         md += "---\n\n"
         md += "*Generated by Syntopic Reading System*  \n"
@@ -195,26 +279,36 @@ Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
         return md
 
-    def polish_trail(self, trail_idea: Dict, excerpts: List[Dict]) -> Dict:
+    def polish_trail(self, trail_idea: Dict, excerpts: List[Dict],
+                      include_synthesis: bool = True) -> Dict:
         """
         Complete polish workflow
 
         Args:
             trail_idea: Trail idea dict
             excerpts: List of excerpts from research agent
+            include_synthesis: Generate the draft synthesis section (default: True).
+                Pass False (wired from --no-synthesis) to skip the extra LLM call and
+                omit the section entirely, reproducing the pre-synthesis markdown.
 
         Returns:
-            Dict with polished_excerpts and markdown fields
+            Dict with polished_excerpts, markdown, and synthesis (None when skipped) fields
         """
         # Add highlights and connection notes
         polished_excerpts = self.add_highlights_and_connections(trail_idea, excerpts)
 
+        # Draft synthesis — one LLM call over the assembled excerpts + connection notes
+        synthesis = None
+        if include_synthesis:
+            synthesis = self.generate_synthesis(trail_idea, polished_excerpts)
+
         # Format as markdown
-        markdown = self.format_trail_markdown(trail_idea, polished_excerpts)
+        markdown = self.format_trail_markdown(trail_idea, polished_excerpts, synthesis=synthesis)
 
         return {
             "polished_excerpts": polished_excerpts,
-            "markdown": markdown
+            "markdown": markdown,
+            "synthesis": synthesis,
         }
 
 

@@ -1,10 +1,10 @@
 """Research Agent - Browses chunks, sequences excerpts across books"""
 
 from typing import List, Dict, Optional
-import anthropic
 
 from src.database.operations import get_db
-from src.config import ANTHROPIC_API_KEY, CLAUDE_MODEL, MAX_EXCERPTS_PER_TRAIL, TRAILS_DIR
+from src.config import MAX_EXCERPTS_PER_TRAIL, TRAILS_DIR
+from src.llm.client import get_client
 from src.agent.trail_constraints import (
     build_existing_trail_corpus,
     count_excerpt_appearances,
@@ -18,24 +18,25 @@ class ResearchAgent:
     Uses CLI tools to:
     - Find chunks containing target topics
     - Browse related content via topic graph
-    - Sequence excerpts narratively across ≥2 books
+    - Sequence excerpts narratively across ≥4 distinct books, no single book dominating
     - Select 5-10 representative excerpts
 
     Workflow:
     1. Search for chunks with target topics
-    2. Use Claude to evaluate relevance and sequencing
+    2. Use the configured LLM to evaluate relevance and sequencing
     3. Return structured excerpt list with book context
     """
 
-    def __init__(self, model: str = CLAUDE_MODEL):
+    def __init__(self, model: str = None):
         """
         Initialize research agent
 
         Args:
-            model: Claude model to use (default: opus-4-6)
+            model: Optional LLM model override (defaults to the configured
+                LLM_MODEL - see src/llm/client.py)
         """
-        self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        self.model = model
+        self.client = get_client(model=model)
+        self.model = self.client.model
 
     def find_chunks_for_topics(self, topic_labels: List[str], limit_per_topic: int = 20) -> List[Dict]:
         """
@@ -141,7 +142,7 @@ class ResearchAgent:
 
     def sequence_excerpts(self, trail_idea: Dict, chunks: List[Dict]) -> List[Dict]:
         """
-        Use Claude to sequence excerpts narratively
+        Use the configured LLM to sequence excerpts narratively
 
         Args:
             trail_idea: Trail idea dict with title, description, target_topics
@@ -171,7 +172,8 @@ Target Topics: {', '.join(trail_idea['target_topics'])}
 # Task:
 Select {MAX_EXCERPTS_PER_TRAIL} excerpts that:
 - Best illustrate the trail concept
-- Span at least 2 different books
+- Span at least 4 distinct books, with no single book contributing more than
+  45% of the excerpts
 - Create a coherent narrative arc
 - Show thematic evolution or contrast
 
@@ -187,19 +189,11 @@ Select {MAX_EXCERPTS_PER_TRAIL} excerpts that:
 
 Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
-        # Call Claude
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=2000,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
-        )
+        # Call the configured LLM
+        response_text = self.client.complete("", prompt, max_tokens=2000)
 
         # Parse response
         import json
-        response_text = message.content[0].text
 
         # Handle markdown code blocks
         if "```json" in response_text:
@@ -265,12 +259,13 @@ Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
         excerpts = self.sequence_excerpts(trail_idea, chunks)
 
         if not excerpts:
-            raise ValueError("No excerpts selected by Claude")
+            raise ValueError("No excerpts selected by the LLM")
 
-        # Verify cross-book coverage
+        # Verify cross-book coverage (matches the stage-3.5 gate's minimum in
+        # src/agent/trail_constraints.py: check_minimum_book_diversity)
         unique_books = set(e["book_title"] for e in excerpts)
-        if len(unique_books) < 2:
-            print(f"⚠️  Warning: Trail only spans {len(unique_books)} book(s) - target is ≥2")
+        if len(unique_books) < 4:
+            print(f"⚠️  Warning: Trail only spans {len(unique_books)} book(s) - target is ≥4")
 
         return excerpts
 

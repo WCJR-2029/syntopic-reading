@@ -1,16 +1,11 @@
-"""Topic extraction using Gemini to extract 3-5 topics per chunk"""
+"""Topic extraction using a provider-agnostic LLM client to extract 3-5 topics
+per chunk. See src/llm/client.py for provider config ("bring your own LLM" -
+defaults to Anthropic; also supports OpenAI-compatible endpoints)."""
 
-import os
 import json
-import time
-from google import genai
-from dotenv import load_dotenv
 from typing import List
 
-load_dotenv()
-
-# Configure Gemini with new API
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+from src.llm.client import get_client
 
 
 class TopicExtractor:
@@ -21,40 +16,13 @@ class TopicExtractor:
         Initialize topic extractor
 
         Args:
-            model_name: Gemini model to use (default: gemini-2.5-flash-lite)
+            model_name: Optional LLM model override (defaults to the
+                configured LLM_MODEL for whichever provider LLM_PROVIDER
+                selects - see src/llm/client.py)
             num_topics: Target number of topics to extract (default 5)
         """
-        self.model_name = model_name or os.getenv(
-            "SYNTOPIC_TOPIC_MODEL", "models/gemini-2.5-flash-lite"
-        )
+        self.client = get_client(model=model_name)
         self.num_topics = num_topics
-
-    _TRANSIENT_MARKERS = (
-        "503", "unavailable", "overloaded", "429",
-        "resource_exhausted", "rate limit", "deadline",
-    )
-
-    def _generate_with_retry(self, prompt, max_attempts: int = 5):
-        """Call Gemini, retrying transient errors (503/overload/429) with
-        exponential backoff. Returns the response, or None if all attempts fail."""
-        delay = 2.0
-        for attempt in range(1, max_attempts + 1):
-            try:
-                return client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                )
-            except Exception as e:
-                msg = str(e).lower()
-                transient = any(m in msg for m in self._TRANSIENT_MARKERS)
-                if transient and attempt < max_attempts:
-                    print(f"  Gemini transient error (attempt {attempt}/{max_attempts}), "
-                          f"retrying in {delay:.0f}s…")
-                    time.sleep(delay)
-                    delay *= 2
-                    continue
-                print(f"Warning: Gemini API error - {e}")
-                return None
 
     def extract_topics(self, chunk_text: str) -> List[str]:
         """
@@ -81,11 +49,9 @@ Return ONLY a JSON array of topic strings, nothing else.
 Example: ["leadership challenges", "organizational trust", "team dysfunction patterns", "conflict resolution", "accountability frameworks"]
 """
 
+        text = None
         try:
-            response = self._generate_with_retry(prompt)
-            if response is None:
-                return []
-            text = response.text.strip()
+            text = self.client.complete("", prompt, max_tokens=300).strip()
 
             # Remove markdown code blocks if present
             if text.startswith("```"):
@@ -109,10 +75,10 @@ Example: ["leadership challenges", "organizational trust", "team dysfunction pat
 
         except json.JSONDecodeError as e:
             print(f"Warning: JSON parse error - {e}")
-            print(f"Response: {response.text[:200]}")
+            print(f"Response: {(text or '')[:200]}")
             return []
         except Exception as e:
-            print(f"Warning: Gemini API error - {e}")
+            print(f"Warning: LLM API error - {e}")
             return []
 
 

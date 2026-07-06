@@ -39,6 +39,11 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))  # for sibling scripts
 
 from rich.console import Console
+import sys as _sys, pathlib as _pl
+_ROOT = str(_pl.Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
+
 from src.config import DATABASE_PATH, BOOKS_RAW_DIR
 
 console = Console()
@@ -101,14 +106,20 @@ def validate_epub(epub: Path) -> tuple[bool, str]:
 
 
 def prereqs() -> list:
-    """Return a list of prerequisite problems (empty == good). Deliberately does NOT
-    call src.config.validate_config(), which falsely fails (it checks GEMINI_API_KEY,
-    but the topic extractor authenticates via GOOGLE_API_KEY). Database existence is
+    """Return a list of prerequisite problems (empty == good). Checks the API key
+    for whichever LLM_PROVIDER is configured (default: Anthropic) — topic
+    extraction and trail generation now share one provider-agnostic client
+    (src/llm/client.py), so a single key covers both. Database existence is
     NOT checked here — ensure_database() handles that by initializing the schema
     rather than treating a missing DB as a blocking failure."""
     problems = []
-    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
-        problems.append("No GOOGLE_API_KEY / GEMINI_API_KEY in environment (topic extraction will fail)")
+    provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+    if provider == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            problems.append("No OPENAI_API_KEY in environment (LLM_PROVIDER=openai; topic extraction will fail)")
+    else:
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            problems.append("No ANTHROPIC_API_KEY in environment (topic extraction will fail)")
     if shutil.which("ebook-meta") is None:
         problems.append("ebook-meta (Calibre CLI) not on PATH — identity pre-check degraded to filename")
     return problems

@@ -35,8 +35,16 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))  # for sibling scripts (matches add_book.py)
 
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
+
+# Load .env before preflight_ingestion_keys() checks os.getenv() below — matches
+# src/config.py (which add_book.py imports and which calls load_dotenv() itself).
+# Without this, the documented quickstart (`cp .env.example .env` then run this
+# script) fails preflight with a false "missing API key", since a key set only
+# in `.env` (not the shell environment) would never be seen.
+load_dotenv()
 
 console = Console()
 PYTHON = sys.executable
@@ -156,14 +164,19 @@ def download_book(book: dict, force: bool = False) -> Path | None:
 
 def preflight_ingestion_keys() -> list[str]:
     """Return a list of missing-key problems (empty == good). Mirrors
-    add_book.py's own key check (GOOGLE_API_KEY/GEMINI_API_KEY for topic
-    extraction, ANTHROPIC_API_KEY for trail generation) so this fails fast,
-    before spending any API calls, instead of partway through all of them."""
+    add_book.py's own key check: topic extraction and trail generation now
+    share one provider-agnostic client (src/llm/client.py), so this checks the
+    API key for whichever LLM_PROVIDER is configured (Anthropic by default,
+    or OpenAI if LLM_PROVIDER=openai) — failing fast, before spending any API
+    calls, instead of partway through all of them."""
     problems = []
-    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
-        problems.append("GOOGLE_API_KEY / GEMINI_API_KEY")
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        problems.append("ANTHROPIC_API_KEY")
+    provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+    if provider == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            problems.append("OPENAI_API_KEY")
+    else:
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            problems.append("ANTHROPIC_API_KEY")
     return problems
 
 
@@ -270,7 +283,8 @@ def main():
         action="store_true",
         help="Fetch the demo EPUBs into data/books/demo/ but skip ingestion "
              "(no API keys required — useful for testing or if you don't yet "
-             "have GOOGLE_API_KEY/ANTHROPIC_API_KEY set).",
+             "have your configured LLM provider's API key set — ANTHROPIC_API_KEY "
+             "by default).",
     )
     ap.add_argument(
         "--force",

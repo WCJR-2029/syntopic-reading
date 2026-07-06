@@ -1,26 +1,24 @@
-"""Usefulness filter using Gemini to classify chunks as useful for topic extraction"""
+"""Usefulness filter using a provider-agnostic LLM client to classify chunks
+as useful for topic extraction. See src/llm/client.py for provider config
+("bring your own LLM" - defaults to Anthropic; also supports OpenAI-compatible
+endpoints)."""
 
-import os
-from google import genai
-from dotenv import load_dotenv
-
-load_dotenv()
-
-# Configure Gemini with new API
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+from src.llm.client import get_client
 
 
 class UsefulnessFilter:
     """Binary classification: is chunk useful for topic extraction?"""
 
-    def __init__(self, model_name: str = "models/gemini-2.5-flash-lite"):
+    def __init__(self, model_name: str = None):
         """
         Initialize usefulness filter
 
         Args:
-            model_name: Gemini model to use (default: gemini-2.5-flash-lite for low cost)
+            model_name: Optional LLM model override (defaults to the
+                configured LLM_MODEL for low-cost, high-throughput
+                classification - see src/llm/client.py)
         """
-        self.model_name = model_name
+        self.client = get_client(model=model_name)
 
     def is_useful(self, chunk_text: str) -> bool:
         """
@@ -53,11 +51,7 @@ Text chunk:
 Answer with only: YES or NO"""
 
         try:
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=prompt
-            )
-            answer = response.text.strip().upper()
+            answer = self.client.complete("", prompt, max_tokens=20).strip().upper()
 
             # Handle various response formats
             if "YES" in answer:
@@ -69,7 +63,7 @@ Answer with only: YES or NO"""
                 return True
 
         except Exception as e:
-            print(f"Warning: Gemini API error - {e}")
+            print(f"Warning: LLM API error - {e}")
             # Default to useful if API fails
             return True
 

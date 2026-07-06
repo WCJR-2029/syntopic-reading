@@ -10,9 +10,16 @@ load_dotenv()
 # Project root
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# API Keys
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# LLM Provider ("bring your own LLM" - see src/llm/client.py). Default is
+# Anthropic (Claude) - the whole pipeline (topic extraction, usefulness
+# filtering, trail generation) runs on this ONE key. Set LLM_PROVIDER=openai
+# to use OpenAI or any OpenAI-compatible endpoint instead (OpenAI, OpenRouter,
+# local Ollama / LM Studio, ...).
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-5")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 
 # Database
 DATABASE_PATH = PROJECT_ROOT / os.getenv("DATABASE_PATH", "data/database/syntopic.db")
@@ -20,7 +27,6 @@ DATABASE_PATH = PROJECT_ROOT / os.getenv("DATABASE_PATH", "data/database/syntopi
 # Models
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "384"))
-RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 
 # Processing Parameters
 TARGET_CHUNK_SIZE = int(os.getenv("TARGET_CHUNK_SIZE", "500"))
@@ -30,7 +36,6 @@ MIN_PMI_SCORE = float(os.getenv("MIN_PMI_SCORE", "0.5"))
 NOVELTY_K_NEIGHBORS = int(os.getenv("NOVELTY_K_NEIGHBORS", "10"))
 
 # Agent Parameters
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-4-8")
 MAX_EXCERPTS_PER_TRAIL = int(os.getenv("MAX_EXCERPTS_PER_TRAIL", "10"))
 
 # Paths
@@ -49,11 +54,15 @@ def validate_config():
     """Validate that required configuration is present"""
     errors = []
 
-    if not GEMINI_API_KEY:
-        errors.append("GEMINI_API_KEY not found in environment")
-
-    if not ANTHROPIC_API_KEY:
-        errors.append("ANTHROPIC_API_KEY not found in environment")
+    provider = (LLM_PROVIDER or "anthropic").strip().lower()
+    if provider == "openai":
+        if not OPENAI_API_KEY:
+            errors.append("OPENAI_API_KEY not found in environment (required for LLM_PROVIDER=openai)")
+    elif provider == "anthropic":
+        if not ANTHROPIC_API_KEY:
+            errors.append("ANTHROPIC_API_KEY not found in environment (required for LLM_PROVIDER=anthropic)")
+    else:
+        errors.append(f"Unsupported LLM_PROVIDER '{provider}' - expected 'anthropic' or 'openai'")
 
     if errors:
         raise ValueError(f"Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))

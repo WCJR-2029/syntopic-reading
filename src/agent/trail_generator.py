@@ -29,7 +29,7 @@ class TrailGenerator:
     """
 
     def __init__(self, percentile: int = 90, num_ideas: int = 5,
-                 enforce_quality_gate: bool = True):
+                 enforce_quality_gate: bool = True, include_synthesis: bool = True):
         """
         Initialize trail generator
 
@@ -40,11 +40,15 @@ class TrailGenerator:
                 (single-author cap, book-diversity minimum) and save the trail
                 anyway. Use sparingly to feature a single distinctive-vocabulary
                 book the gate would otherwise reject. Default: True.
+            include_synthesis: Generate a "## The synthesis (draft)" section (one
+                extra LLM call) appended to the trail markdown after the last
+                excerpt. Default: True. Wired from --no-synthesis on the CLI.
         """
         self.ideation = IdeationAgent(percentile=percentile, num_ideas=num_ideas)
         self.research = ResearchAgent()
         self.polish = PolishAgent()
         self.enforce_quality_gate = enforce_quality_gate
+        self.include_synthesis = include_synthesis
 
     def _anchored_excerpts(self, pack: Dict) -> List[Dict]:
         """Convert an anchored_retrieval pack into research-style excerpt dicts.
@@ -171,7 +175,7 @@ class TrailGenerator:
             else:
                 print(f"Mode: Auto-generate {self.ideation.num_ideas} ideas using novel topics")
 
-            print("\nCalling Claude for ideation...")
+            print("\nCalling the LLM for ideation...")
             trail_ideas = self.ideation.generate_ideas(user_idea=user_idea)
 
             # Select trail idea
@@ -217,7 +221,9 @@ class TrailGenerator:
         print("-" * 40)
         print("Adding highlights and connection notes...")
 
-        polished_data = self.polish.polish_trail(trail_idea, excerpts)
+        polished_data = self.polish.polish_trail(
+            trail_idea, excerpts, include_synthesis=self.include_synthesis
+        )
 
         print(f"\n✅ Polish Complete:")
         print(f"   Highlights added: {sum(len(e.get('highlights', [])) for e in polished_data['polished_excerpts'])}")
@@ -328,6 +334,9 @@ def main():
     parser.add_argument("--no-quality-gate", action="store_true",
                         help="Bypass STAGE 3.5 constraint validation (single-author cap, "
                              "book-diversity minimum) and save the trail anyway. Use sparingly.")
+    parser.add_argument("--no-synthesis", action="store_true",
+                        help="Skip the '## The synthesis (draft)' section (one extra LLM "
+                             "call) that is otherwise appended after the last excerpt.")
 
     # --- Anchored / steered mode (Phase 7, ADR-005) ---
     anchor_group = parser.add_argument_group(
@@ -359,7 +368,8 @@ def main():
     generator = TrailGenerator(
         percentile=args.percentile,
         num_ideas=args.num_ideas,
-        enforce_quality_gate=not args.no_quality_gate
+        enforce_quality_gate=not args.no_quality_gate,
+        include_synthesis=not args.no_synthesis
     )
 
     anchored = bool(args.anchor_book or args.anchor_chunks or args.seed_topics)

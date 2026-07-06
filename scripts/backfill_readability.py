@@ -26,12 +26,19 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-from src.config import ANTHROPIC_API_KEY, DATABASE_PATH
+import sys as _sys, pathlib as _pl
+_ROOT = str(_pl.Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
+
+from src.config import DATABASE_PATH
+from src.llm.client import get_client
 from src.readers.excerpt_repair import repair_excerpt, clean_for_reading, flatten_prose
 from src.agent.trail_parser import parse_trail
 
 TRAILS = REPO / "data" / "trails"
-SETTINGS_MODEL = "claude-sonnet-5"   # orientation notes are not frontier work
+SETTINGS_MODEL = "claude-sonnet-5"   # orientation notes are not frontier work (Anthropic-only override;
+                                      # ignored under LLM_PROVIDER=openai - see settings_for_trail below)
 MAX_EXCERPT_CHARS = 1800             # cap after full-chunk recovery
 _HDR = re.compile(r"^###\s+Excerpt\s+(\d+):.*$", re.MULTILINE)
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
@@ -94,13 +101,8 @@ Plain language, no jargon, no assuming familiarity. Do not restate the trail's a
 that is the connection note's job. If the book title looks mangled, infer the real book.
 
 Return STRICT JSON only: {"settings": {"<excerpt number>": "<setting>", ...}}"""
-    msg = client.messages.create(model=SETTINGS_MODEL, max_tokens=4000,
-                                 messages=[{"role": "user", "content": prompt}])
-    # Sonnet 5 may lead with a ThinkingBlock - take the text block, not content[0].
-    block = next((b for b in msg.content if getattr(b, "type", "") == "text"), None)
-    if block is None:
-        raise RuntimeError("no text block in model response")
-    t = block.text.strip()
+    # (Thinking-block-safe text extraction now lives centrally in LLMClient.complete().)
+    t = client.complete("", prompt, max_tokens=4000).strip()
     if "```json" in t:
         t = t.split("```json", 1)[1].split("```", 1)[0]
     elif "```" in t:
@@ -141,8 +143,12 @@ def main():
                          "corruption with the fixed excerpt_repair.")
     args = ap.parse_args()
 
-    import anthropic
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    # SETTINGS_MODEL is a cheaper Anthropic-specific override for this one-time
+    # utility; under LLM_PROVIDER=openai fall back to the configured default
+    # model instead of sending an Anthropic model name to an OpenAI-compatible
+    # endpoint.
+    _default_client = get_client()
+    client = get_client(model=SETTINGS_MODEL) if _default_client.provider == "anthropic" else _default_client
     db = sqlite3.connect(DATABASE_PATH)
     print("loading chunk index...", flush=True)
     index = ChunkIndex(db.cursor())

@@ -44,18 +44,22 @@ writing, a decision you're stuck on, a tension you can't resolve - and use the t
 scaffolding* for your own thinking. The tool surfaces the cross-book connections; the judgment stays
 yours. Build the loop with yourself in it, or don't bother.
 
+*The longer version of this argument: [WHY-SYNTOPIC-READING.md](WHY-SYNTOPIC-READING.md).*
+
 ---
 
 ## Quickstart (zero library prep)
 
-You'll need Python 3.10+, a [Google Gemini API key](https://aistudio.google.com/apikey) (topic
-extraction) and an [Anthropic API key](https://console.anthropic.com/) (trail generation).
+You'll need Python 3.10+ and **one LLM API key**. It runs on [Anthropic (Claude)](https://console.anthropic.com/)
+by default; set `LLM_PROVIDER=openai` to use OpenAI or **any OpenAI-compatible endpoint** - OpenRouter
+(which fronts Claude, Gemini, GPT, Llama and more) or a local runner like Ollama / LM Studio. No Google
+account required.
 
 ```bash
 git clone https://github.com/WCJR-2029/syntopic-reading.git && cd syntopic-reading
 pip install -e .
 
-cp .env.example .env          # then paste your two API keys into .env
+cp .env.example .env          # then paste your LLM API key into .env
 
 # Fetch ~6 public-domain classics from Project Gutenberg and ingest them:
 python scripts/bootstrap_demo.py
@@ -65,7 +69,10 @@ python -m src.agent.trail_generator --idea "the tension between individual liber
 ```
 
 The demo downloads only public-domain books, so you can try the whole pipeline end-to-end without
-touching your own library.
+touching your own library. Ingesting them makes many LLM calls - roughly two per text chunk across
+the six books (a usefulness check plus topic extraction) - so it costs real money and takes a while
+on a paid model. To fetch the books and try the flow with no API key and no cost first, run
+`python scripts/bootstrap_demo.py --download-only`.
 
 ## Bring your own library
 
@@ -83,12 +90,18 @@ rather than duplicating.
 ## How it works
 
 ```
-EPUB → parse & chunk → topic extraction (Gemini) → embeddings (all-MiniLM-L6-v2)
+EPUB → parse & chunk → topic extraction (your LLM) → embeddings (all-MiniLM-L6-v2)
      → cross-book topic graph (PMI co-occurrence, Leiden clustering, novelty scoring)
-     → trail generation (Claude): excerpts sequenced across books + connection notes
+     → trail generation (your LLM): excerpts across books + connection notes + a draft synthesis
 ```
 
-- **Embeddings:** `all-MiniLM-L6-v2` (384-dim, runs locally, English).
+- **LLM:** one provider does both topic extraction and trail generation, set via `LLM_PROVIDER`
+  (`anthropic` default, or `openai` for any OpenAI-compatible endpoint) and `LLM_MODEL`. Default is
+  `claude-sonnet-5`. **Cost note:** topic extraction makes one LLM call per text chunk, so on a large
+  library the model choice matters - Sonnet is a sensible middle; drop `LLM_MODEL` to a cheaper tier
+  (Haiku / a mini model) to keep ingestion affordable, or raise it (Opus / a frontier model) for the
+  richest trails.
+- **Embeddings:** `all-MiniLM-L6-v2` (384-dim, runs locally, English) - no API.
 - **Metadata:** uses Calibre's `ebook-meta` if present for cleaner title/author; degrades gracefully
   to the filename if not (Calibre is a recommended, not required, dependency).
 

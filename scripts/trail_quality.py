@@ -16,8 +16,13 @@ trails so a long run is crash-safe. Mirrors doctor.py's UX.
 import argparse
 from pathlib import Path
 
-import anthropic
-from src.config import ANTHROPIC_API_KEY, TRAILS_DIR
+import sys as _sys, pathlib as _pl
+_ROOT = str(_pl.Path(__file__).resolve().parent.parent)
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
+
+from src.config import TRAILS_DIR
+from src.llm.client import get_client
 from src.agent.trail_quality import score_trail
 from src.agent import trail_quality_store as store_mod
 from src.agent.trail_dashboard import write_dashboard
@@ -61,7 +66,7 @@ def main() -> int:
     if args.limit:
         targets = targets[: args.limit]
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = get_client()
     scored = skipped = failed = 0
     for i, p in enumerate(targets, 1):
         chash = store_mod.content_hash(p)

@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TRAILS_DIR
+from src.config import TRAILS_DIR
+from src.llm.client import get_client
 from src.agent.trail_parser import parse_trail
 from src.agent.trail_facts import compute_facts, has_hard_flag
 from src.agent import trail_quality_rubric as rubric
@@ -80,17 +81,17 @@ def _now() -> str:
 def score_trail(
     path: str | Path,
     client=None,
-    model: str = CLAUDE_MODEL,
+    model: Optional[str] = None,
     trails_dir: Optional[Path] = None,
     max_retries: int = 1,
 ) -> TrailScore:
-    """Score one trail end-to-end. `client` is an anthropic.Anthropic (created if None)."""
+    """Score one trail end-to-end. `client` is an LLMClient (src/llm/client.py),
+    created via get_client(model=model) if None."""
     path = Path(path)
     if trails_dir is None:
         trails_dir = Path(TRAILS_DIR)
     if client is None:
-        import anthropic
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = get_client(model=model)
 
     raw_text = path.read_text(encoding="utf-8")
     doc = parse_trail(path)
@@ -100,12 +101,8 @@ def score_trail(
     last_err: Optional[Exception] = None
     for attempt in range(max_retries + 1):
         try:
-            msg = client.messages.create(
-                model=model,
-                max_tokens=1500,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            data = _extract_json(msg.content[0].text)
+            response_text = client.complete("", prompt, max_tokens=1500)
+            data = _extract_json(response_text)
             scores = _validate_scores(data)
             accessibility = data.get("accessibility", 0)
             if not isinstance(accessibility, int) or not (0 <= accessibility <= 5):
@@ -142,6 +139,6 @@ def score_trail(
         facts={k: facts[k] for k in ("book_count", "excerpt_count", "top_book",
                                      "top_book_share", "top_author", "top_author_share")},
         hard_capped=hard_capped,
-        model=model,
+        model=client.model,
         ts=_now(),
     )

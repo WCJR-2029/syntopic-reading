@@ -2,7 +2,7 @@
 
 **Status:** Accepted (2026-07-01)
 **Phase:** 7 — anchored/steered trails
-**Related:** `docs/ANCHORED_TRAILS.md`, `scripts/anchored_trail.py` (prototype), ADR-003 (no-hard-cap), ADR-001 (quality judge)
+**Related:** `scripts/anchored_trail.py` (prototype), ADR-003 (no-hard-cap), ADR-001 (quality judge)
 
 ## Context
 
