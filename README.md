@@ -28,6 +28,22 @@ writing, a decision you're stuck on, a tension you can't resolve - and use the t
 scaffolding* for your own thinking. The tool surfaces the cross-book connections; the judgment stays
 yours. Build the loop with yourself in it, or don't bother.
 
+## What would I use this for?
+
+You bring a real question and a shelf of books that might bear on it; the tool finds where they
+connect. For instance:
+
+- **"What do my books actually agree on about building habits that stick?"** - across a few
+  psychology / productivity titles.
+- **"How should I think about money versus happiness?"** - a personal-finance book, a philosophy
+  book, and a memoir.
+- **"What actually makes a team work?"** - across the management books you already own.
+
+It's a cross-reference for your own library: instead of re-reading five books, you ask the question
+once and get the passages that bear on it - from across all of them, with the connections drawn. The
+[example trail](examples/the-porous-membrane.md) shows how far that can reach; most of the time you'll
+point it at something far more everyday.
+
 ---
 
 ## Quickstart (zero library prep)
@@ -88,6 +104,13 @@ EPUB → parse & chunk → topic extraction (Gemini) → embeddings (all-MiniLM-
 Built for the author's own use and shared as a reference implementation. **Provided as-is and
 essentially unmaintained** - issues may go unanswered. Contributions welcome under the rules in
 [CONTRIBUTING.md](CONTRIBUTING.md) (notably: **no copyrighted content, no DRM tooling**).
+
+## Using this with a personalized AI setup
+
+Trails are plain markdown files - so if you run a personalized-AI or filesystem-context workflow,
+they double as ready-made context artifacts your assistant can read directly, and the pipeline itself
+can be wrapped as a skill or scheduled job. Nothing here assumes a particular framework; it's just
+files on disk.
 
 ## License
 
