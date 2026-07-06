@@ -11,23 +11,6 @@ Point it at a library of books and it will: parse and chunk them, extract topics
 topic graph, and generate **reading trails** - ordered sequences of excerpts drawn from *different*
 books, stitched together by the ideas that connect them.
 
-### See what it produces
-
-→ **[`examples/the-porous-membrane.md`](examples/the-porous-membrane.md)** - a real trail on *"why do
-some communities absorb their eccentrics while others expel them?"*, moving across ten books (Greene,
-Haidt, Hawthorne, Brontë, Alexievich, Pink, Ferguson, Tergit, Rand, Doyle) from Athenian ostracism to
-a Mumbai lunch-delivery network to Nazi Berlin. That range - one question, ten authors - is the whole
-point.
-
-### One idea worth internalizing first
-
-**A trail is worthless until your own live question enters the loop.** This is not a machine that
-reads *for* you. Fed a vague prompt, it will produce a competent-looking list you'll forget in a day.
-Its value shows up only when you arrive with a real question you're actually chasing - an essay you're
-writing, a decision you're stuck on, a tension you can't resolve - and use the trail as *evidence and
-scaffolding* for your own thinking. The tool surfaces the cross-book connections; the judgment stays
-yours. Build the loop with yourself in it, or don't bother.
-
 ## What would I use this for?
 
 You bring a real question and a shelf of books that might bear on it; the tool finds where they
@@ -43,6 +26,23 @@ It's a cross-reference for your own library: instead of re-reading five books, y
 once and get the passages that bear on it - from across all of them, with the connections drawn. The
 [example trail](examples/the-porous-membrane.md) shows how far that can reach; most of the time you'll
 point it at something far more everyday.
+
+## See what it produces
+
+→ **[`examples/the-porous-membrane.md`](examples/the-porous-membrane.md)** - a real trail on *"why do
+some communities absorb their eccentrics while others expel them?"*, moving across ten books (Greene,
+Haidt, Hawthorne, Brontë, Alexievich, Pink, Ferguson, Tergit, Rand, Doyle) from Athenian ostracism to
+a Mumbai lunch-delivery network to Nazi Berlin. That range - one question, ten authors - is the whole
+point.
+
+## One idea worth internalizing first
+
+**A trail is worthless until your own live question enters the loop.** This is not a machine that
+reads *for* you. Fed a vague prompt, it will produce a competent-looking list you'll forget in a day.
+Its value shows up only when you arrive with a real question you're actually chasing - an essay you're
+writing, a decision you're stuck on, a tension you can't resolve - and use the trail as *evidence and
+scaffolding* for your own thinking. The tool surfaces the cross-book connections; the judgment stays
+yours. Build the loop with yourself in it, or don't bother.
 
 ---
 
