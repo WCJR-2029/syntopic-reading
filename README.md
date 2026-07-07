@@ -48,6 +48,15 @@ yours. Build the loop with yourself in it, or don't bother.
 
 ---
 
+## Do I need to be a developer? (What you actually need)
+
+Not really - but you do need to be comfortable running a few commands in a terminal. Here's the honest bar:
+
+- **This is a command-line tool (Python), not an app or a website.** You clone it, install it, and run it from a terminal. If you can follow copy-paste steps in a terminal, you can run it.
+- **It needs an LLM API key** - Anthropic (Claude), OpenAI, an OpenAI-compatible endpoint like OpenRouter, or a **free local model** via Ollama / LM Studio. An API key is **not** the same thing as a ChatGPT Plus or Claude.ai *subscription* - it's separate, pay-as-you-go programmatic access (the demo costs a few dollars on a paid key, or nothing at all on a local model). The tool makes ~2 calls per text chunk in a loop, which is why it needs an API, not a chat window.
+- **You do NOT need any special AI coding tool** (Claude Code, Cursor, etc.) to *run* it - just Python and that key.
+- **Not comfortable in a terminal?** Paste this README into an AI assistant (ChatGPT, Claude, Gemini) and ask it to walk you through the install step by step for your operating system. It will happily co-pilot the whole thing.
+
 ## Quickstart (zero library prep)
 
 You'll need Python 3.10+ and **one LLM API key**. It runs on [Anthropic (Claude)](https://console.anthropic.com/)
