@@ -11,6 +11,7 @@ mechanical failure modes identified in the 96-trail critical analysis
   5. Near-duplicate title against existing trails (Jaccard >0.5)
 """
 
+import math
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -59,6 +60,28 @@ def check_minimum_book_diversity(
             f"only {len(books)} distinct books (minimum {min_books})",
         )
     return None
+
+
+def library_aware_thresholds(library_book_count: Optional[int]) -> Tuple[int, float]:
+    """Scale the two structural gate thresholds to the size of the library the
+    trail was drawn from.
+
+    The strict defaults (>=4 distinct books, <=45% from any one book) assume a
+    large corpus where any theme has deep, well-distributed coverage. On a small
+    library the books cluster thematically, so a genuine syntopic trail may
+    honestly span fewer books, with one carrying a larger share — demanding 4 of,
+    say, 5 books forces irrelevant excerpts in just to clear the count. This scales
+    the floor to ~60% of the library (capped at the strict 4) and eases the
+    single-book share a little as the required book-count drops.
+
+    Returns ``(min_books, max_author_share)``. With no count (or a large library),
+    returns the strict large-corpus defaults, so existing callers are unchanged.
+    """
+    if not library_book_count or library_book_count >= 7:
+        return 4, 0.45
+    min_books = min(4, max(2, math.ceil(0.6 * library_book_count)))
+    max_share = min(0.60, 0.45 + 0.05 * (4 - min_books))
+    return min_books, max_share
 
 
 def _normalize_excerpt_text(text: str) -> str:
@@ -336,6 +359,7 @@ def validate_trail(
     trails_dir: Optional[Path] = None,
     *,
     check_description: bool = False,
+    library_book_count: Optional[int] = None,
 ) -> Tuple[bool, List[ConstraintViolation]]:
     """Run constraint checks. Returns (passed, list-of-violations).
 
@@ -353,9 +377,11 @@ def validate_trail(
     """
     violations: List[ConstraintViolation] = []
 
+    min_books, max_share = library_aware_thresholds(library_book_count)
+
     for check_fn, args in [
-        (check_single_author_dominance, (excerpts,)),
-        (check_minimum_book_diversity, (excerpts,)),
+        (check_single_author_dominance, (excerpts, max_share)),
+        (check_minimum_book_diversity, (excerpts, min_books)),
         (check_excerpt_repetition, (excerpts,)),
     ]:
         v = check_fn(*args)

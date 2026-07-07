@@ -277,6 +277,19 @@ Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
         if not trails:
             raise ValueError("No trail ideas returned from the LLM")
 
+        # Defensive shape check: downstream indexes trail_idea['title'], so a
+        # malformed payload the client could not repair must fail cleanly here
+        # (the caller catches ValueError and skips the trail) rather than
+        # crashing later with an opaque "string indices must be integers".
+        if not isinstance(trails, list) or not all(
+            isinstance(t, dict) and "title" in t for t in trails
+        ):
+            first = type(trails[0]).__name__ if isinstance(trails, list) and trails else "n/a"
+            raise ValueError(
+                f"ideation returned malformed trail ideas "
+                f"(got {type(trails).__name__}, first item {first})"
+            )
+
         return trails
 
     def generate_anchor_title_desc(

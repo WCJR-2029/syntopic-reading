@@ -232,6 +232,7 @@ class LLMClient:
                         system, prompt, tokens, schema, tool_name, tool_description)
                 else:
                     data = self._complete_json_openai(system, prompt, tokens)
+                data = self._normalize_structured_json(data, schema)
                 self._validate_json_result(data, schema)
                 return data
             except LLMJSONError as e:
@@ -347,6 +348,40 @@ class LLMClient:
         missing = [k for k in schema.get("required", []) if k not in data]
         if missing:
             raise LLMJSONError(f"JSON object missing required key(s): {', '.join(missing)}")
+
+    @staticmethod
+    def _normalize_structured_json(data: dict, schema: Optional[dict]) -> dict:
+        """Repair a well-known structured-output failure mode: some models emit a
+        nested array/object as a JSON-*encoded string* under a top-level key
+        (e.g. tool input ``{"trails": "{\\"trails\\": [ ... ]}"}``) instead of the
+        array itself. The content is valid — only the encoding is wrong — so we
+        transparently decode it here rather than letting the caller crash
+        downstream on ``value['key']``. Anything that does not cleanly decode to
+        the declared type is left untouched for ``_validate_json_result`` / the
+        caller to reject.
+        """
+        if not schema or not isinstance(data, dict):
+            return data
+        props = schema.get("properties", {})
+        for key in schema.get("required", []):
+            val = data.get(key)
+            if not isinstance(val, str):
+                continue
+            try:
+                decoded = json.loads(_strip_code_fences(val))
+            except (json.JSONDecodeError, ValueError):
+                continue
+            # Whole object stringified under its own key:
+            #   {"trails": '{"trails": [...]}'}  ->  data["trails"] = [...]
+            if isinstance(decoded, dict) and key in decoded:
+                data[key] = decoded[key]
+                continue
+            # Bare value stringified, matching the schema's declared type.
+            expected = props.get(key, {}).get("type")
+            if (expected == "array" and isinstance(decoded, list)) or \
+               (expected == "object" and isinstance(decoded, dict)):
+                data[key] = decoded
+        return data
 
 
 @lru_cache(maxsize=None)

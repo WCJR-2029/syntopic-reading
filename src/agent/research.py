@@ -38,6 +38,64 @@ class ResearchAgent:
         self.client = get_client(model=model)
         self.model = self.client.model
 
+    def _get_vector_search(self):
+        """Lazily build + cache the topic vector store and embedding model.
+
+        Returns ``(store, model)``, or ``(None, None)`` if the vector store is
+        unavailable (e.g. embeddings were never built) so callers transparently
+        fall back to exact label matching."""
+        if getattr(self, "_vec_store", "unset") == "unset":
+            try:
+                from src.database.vector_store import VectorStore
+                from src.embeddings.embedding_model import EmbeddingModel
+                from src.config import DATABASE_PATH
+                self._vec_store = VectorStore(DATABASE_PATH)
+                self._embed_model = EmbeddingModel()
+            except Exception as e:  # noqa: BLE001 - degrade gracefully
+                print(f"   Note: semantic topic resolution unavailable ({e}); "
+                      f"using exact label match only.")
+                self._vec_store = None
+                self._embed_model = None
+        return self._vec_store, self._embed_model
+
+    def _resolve_topic_ids(self, topic_labels: List[str], semantic_k: int = 3) -> List[int]:
+        """Map requested topic labels to concrete canonical topic IDs.
+
+        For each label: keep the exact-label match if one exists, then expand with
+        the ``semantic_k`` nearest topics from the vector store. Returns an ordered,
+        de-duplicated ID list. This expansion is what lets a trail span multiple
+        books: topic labels are per-chunk LLM output and are almost never shared
+        verbatim across books (~0.2% of topics appear in >=2 books), so exact-only
+        matching collapses a trail onto whichever single book owns the one matching
+        label. Exact matches still rank first (semantic distance 0.0)."""
+        ids: List[int] = []
+        seen = set()
+
+        def _add(tid):
+            if tid is not None and tid not in seen:
+                seen.add(tid)
+                ids.append(tid)
+
+        store, model = self._get_vector_search()
+        with get_db() as db:
+            cursor = db.conn.cursor()
+            for label in topic_labels:
+                row = cursor.execute(
+                    "SELECT id FROM topics WHERE label = ? AND canonical_id IS NULL LIMIT 1",
+                    (label,),
+                ).fetchone()
+                if row:
+                    _add(row[0])
+                if store is not None:
+                    try:
+                        for tid, _lbl, _dist in store.search_by_text(
+                            label, k=semantic_k, model=model
+                        ):
+                            _add(tid)
+                    except Exception:  # noqa: BLE001 - keep exact matches on failure
+                        pass
+        return ids
+
     def find_chunks_for_topics(self, topic_labels: List[str], limit_per_topic: int = 20) -> List[Dict]:
         """
         Find chunks containing target topics
@@ -52,23 +110,16 @@ class ResearchAgent:
         chunks = []
         seen_chunk_ids = set()
 
+        # Resolve free-text labels to concrete canonical topic IDs (exact match +
+        # nearest-neighbour semantic expansion). Exact-only matching collapses a
+        # trail onto a single book because topic labels are almost never shared
+        # verbatim across books; see _resolve_topic_ids.
+        topic_ids = self._resolve_topic_ids(topic_labels)
+
         with get_db() as db:
             cursor = db.conn.cursor()
 
-            for topic_label in topic_labels:
-                # Find topic ID
-                cursor.execute("""
-                    SELECT id FROM topics
-                    WHERE label = ? AND canonical_id IS NULL
-                    LIMIT 1
-                """, (topic_label,))
-
-                topic_result = cursor.fetchone()
-                if not topic_result:
-                    continue
-
-                topic_id = topic_result[0]
-
+            for topic_id in topic_ids:
                 # Get chunks with this topic
                 cursor.execute("""
                     SELECT c.id, c.book_id, c.chunk_index, c.text, c.word_count, b.title, b.author

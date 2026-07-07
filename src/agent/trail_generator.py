@@ -15,6 +15,7 @@ from src.agent.trail_constraints import (
 from src.config import TRAILS_DIR
 from src.llm.client import LLMError
 from src.agent import anchored_retrieval as ar
+from src.database.operations import get_db
 
 
 class TrailGenerator:
@@ -50,6 +51,18 @@ class TrailGenerator:
         self.polish = PolishAgent()
         self.enforce_quality_gate = enforce_quality_gate
         self.include_synthesis = include_synthesis
+        self._book_count: Optional[int] = None
+
+    def _library_book_count(self) -> int:
+        """Total books in the active library, cached. Used to scale the quality
+        gate's structural thresholds to library size (library_aware_thresholds):
+        a small library should not be held to the large-corpus >=4-book rule."""
+        if self._book_count is None:
+            with get_db() as db:
+                self._book_count = db.conn.cursor().execute(
+                    "SELECT COUNT(*) FROM books"
+                ).fetchone()[0]
+        return self._book_count
 
     def _anchored_excerpts(self, pack: Dict) -> List[Dict]:
         """Convert an anchored_retrieval pack into research-style excerpt dicts.
@@ -256,6 +269,7 @@ class TrailGenerator:
                 trail_idea,
                 polished_data["polished_excerpts"],
                 trails_dir=TRAILS_DIR,
+                library_book_count=self._library_book_count(),
             )
             if not passed:
                 print("❌ Trail rejected by quality gate:")
