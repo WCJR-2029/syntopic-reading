@@ -142,7 +142,8 @@ class IdeationAgent:
             # library), fall back to raw novelty so ideation still has material.
             if not fresh:
                 print("   Ideation: no fully-fresh novel topics found; falling back to "
-                      "raw novelty ranking.")
+                      "raw novelty ranking (normal on a small or focused library - "
+                      "trail quality is unaffected).")
                 for topic_id, label, frequency, novelty in candidates[:limit]:
                     fresh.append({
                         "id": topic_id,

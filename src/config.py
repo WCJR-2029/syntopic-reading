@@ -32,8 +32,10 @@ EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "384"))
 TARGET_CHUNK_SIZE = int(os.getenv("TARGET_CHUNK_SIZE", "500"))
 CHUNK_TOLERANCE = float(os.getenv("CHUNK_TOLERANCE", "0.2"))
 TOPICS_PER_CHUNK = int(os.getenv("TOPICS_PER_CHUNK", "5"))
-MIN_PMI_SCORE = float(os.getenv("MIN_PMI_SCORE", "0.5"))
 NOVELTY_K_NEIGHBORS = int(os.getenv("NOVELTY_K_NEIGHBORS", "10"))
+# Note: graph edge thresholds (min PMI, min co-occurrence) are NOT env vars - they
+# are build_graph.py CLI flags (--min-pmi / --min-cooccurrence). A former unused
+# MIN_PMI_SCORE env var was removed to avoid shipping config that never took effect.
 
 # Agent Parameters
 MAX_EXCERPTS_PER_TRAIL = int(os.getenv("MAX_EXCERPTS_PER_TRAIL", "10"))

@@ -289,7 +289,8 @@ Return ONLY the synthesis prose (2-3 paragraphs) — nothing else."""
         # Books
         md += "### Books in Trail:\n\n"
         for book in sorted(unique_books.values(), key=lambda x: x["title"]):
-            md += f"- \"{book['title']}\" by {book['author']} ({book['excerpt_count']} excerpts)\n"
+            _n = book['excerpt_count']
+            md += f"- \"{book['title']}\" by {book['author']} ({_n} excerpt{'s' if _n != 1 else ''})\n"
 
         # Topics (show top 10)
         md += "\n### Key Topics:\n\n"
