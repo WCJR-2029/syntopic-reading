@@ -16,8 +16,14 @@ from src.extraction.usefulness_filter import UsefulnessFilter
 from src.extraction.topic_extractor import TopicExtractor
 from src.database.operations import get_db
 from src.config import TARGET_CHUNK_SIZE, CHUNK_TOLERANCE, TOPICS_PER_CHUNK
+from src.llm.client import get_client
 
 console = Console()
+
+# How often to print a running LLM-call count during a long ingest (a chunk makes
+# up to 2 calls - usefulness check + topic extraction - so a several-hundred-chunk
+# book can run for minutes with zero spend feedback otherwise).
+CALL_COUNT_PRINT_EVERY = 25
 
 
 def process_book_with_topics(epub_path: str | Path) -> dict:
@@ -94,8 +100,9 @@ def process_book_with_topics(epub_path: str | Path) -> dict:
 
             all_topics = set()
             topic_count = 0
+            llm_client = get_client()  # shared, cached - same instance used below
 
-            for chunk in chunks:
+            for i, chunk in enumerate(chunks, 1):
                 # Add chunk to database
                 chunk_id = db.add_chunk(
                     book_id=book_id,
@@ -127,11 +134,18 @@ def process_book_with_topics(epub_path: str | Path) -> dict:
 
                 progress.advance(task)
 
+                if i % CALL_COUNT_PRINT_EVERY == 0:
+                    console.print(f"  [dim]  ...{i}/{len(chunks)} chunks, "
+                                  f"{llm_client.call_count} LLM calls so far[/dim]")
+
             stats['total_topics'] = topic_count
             stats['unique_topics'] = len(all_topics)
+            stats['llm_calls'] = llm_client.call_count
 
             # Update book stats
             db.update_book_stats(book_id, total_chunks=len(chunks), total_topics=len(all_topics))
+
+        console.print(f"  [dim]Total LLM calls for this book: {llm_client.call_count}[/dim]")
 
     return stats
 
@@ -154,6 +168,7 @@ def main():
     console.print(f"  Total topics extracted: {stats['total_topics']}")
     console.print(f"  Unique topics: {stats['unique_topics']}")
     console.print(f"  Avg topics/useful chunk: {stats['total_topics']/stats['useful_chunks']:.1f}" if stats['useful_chunks'] > 0 else "")
+    console.print(f"  LLM calls made: {stats.get('llm_calls', '?')}")
 
     # Show database stats
     console.print("\n[bold]Database Statistics:[/bold]")

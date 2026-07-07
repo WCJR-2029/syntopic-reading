@@ -1,8 +1,53 @@
 """Polish Agent - Adds highlights, formatting, and connection notes"""
 
+import re
 from typing import List, Dict, Optional
 
 from src.llm.client import get_client
+
+# Sentence-ending characters a dewrapped fragment must end with to plausibly
+# close a real paragraph/sentence, rather than a mid-sentence hard-wrap break.
+_TERMINAL_CHARS = ('.', '!', '?', '"', '”', '’', ')', ':', ';')
+
+
+def _dewrap_excerpt(text: str) -> str:
+    """Collapse hard-wrapped line breaks in a chunked excerpt back into clean
+    paragraphs.
+
+    Source excerpt text comes out of the EPUB parser with a newline inserted at
+    every HTML text-node boundary (selectolax's `body.text(separator='\\n', ...)`),
+    including inline tags like `<i>`, so a single sentence can be shredded into a
+    dozen one-word "lines". The chunker (see src/readers/chunker.py) then further
+    re-joins many of those fragments with a blank line (`\\n\\n`) whenever the
+    source HTML section was long enough to hit its >1000-word re-split branch. The
+    upshot: by the time text reaches here, both single and double newlines can mark
+    a mid-sentence hard-wrap rather than a genuine paragraph break, and the two are
+    not reliably distinguishable by newline count alone.
+
+    Heuristic used here (deliberately conservative, render-layer only - no upstream
+    parser/chunker change): split on ANY run of newlines into fragments, then only
+    start a new paragraph where the previous fragment ends on terminal punctuation
+    (a real sentence/clause end); otherwise rejoin fragments with a single space.
+    This can't perfectly recover the original paragraphing (that information doesn't
+    survive the chunker), but it eliminates the blank-line fragmentation that broke
+    the rendered blockquote, and it collapses wrapped sentences back into a form
+    where a highlight phrase that used to span a line break can match again.
+    """
+    fragments = [f.strip() for f in re.split(r'\n+', text) if f.strip()]
+    if not fragments:
+        return text.strip()
+
+    paragraphs = []
+    current = fragments[0]
+    for frag in fragments[1:]:
+        if current.endswith(_TERMINAL_CHARS):
+            paragraphs.append(current)
+            current = frag
+        else:
+            current = f"{current} {frag}"
+    paragraphs.append(current)
+
+    return '\n\n'.join(paragraphs)
 
 
 class PolishAgent:
@@ -261,13 +306,19 @@ Return ONLY the synthesis prose (2-3 paragraphs) — nothing else."""
                 md += f"**Setting**: {excerpt['setting']}  \n"
             md += f"**Connection**: {excerpt['connection_note']}\n\n"
 
-            # Apply highlights
-            text = excerpt['text']
+            # Dewrap BEFORE applying highlights, not after: some highlight phrases
+            # span what used to be a hard-wrap line break in the raw excerpt text,
+            # and only match once that break is collapsed back to a plain space.
+            text = _dewrap_excerpt(excerpt['text'])
             for highlight in excerpt['highlights']:
                 if highlight in text:
                     text = text.replace(highlight, f"**{highlight}**")
 
-            md += f"> {text}\n\n"
+            # Quote EVERY line (including the blank lines between paragraphs, as a
+            # bare ">") so the excerpt renders as one continuous multi-line
+            # blockquote instead of dropping out of the blockquote at each blank line.
+            quoted = '\n'.join(f"> {line}" if line else ">" for line in text.split('\n'))
+            md += f"{quoted}\n\n"
 
         # Synthesis (draft) — optional, sits after the last excerpt and before the
         # generated-by footer. Omitted entirely when synthesis is None.

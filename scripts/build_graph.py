@@ -1,4 +1,4 @@
-"""Build complete topic graph: (Canonicalize) → Co-occurrence → Graph → Clustering → Novelty"""
+"""Build complete topic graph: Canonicalize (default on) → Co-occurrence → Graph → Clustering → Novelty"""
 
 import argparse
 
@@ -24,13 +24,17 @@ def parse_args():
         description="Build the cross-book topic graph (PMI co-occurrence + Leiden clustering)."
     )
     parser.add_argument(
-        "--canonicalize-topics", action="store_true",
-        help="Before building the graph, merge semantically-equivalent topic "
-             "labels (embedding cosine >= --merge-threshold) into one canonical "
+        "--no-canonicalize", action="store_true",
+        help="Skip the topic-canonicalization pass that runs by DEFAULT before "
+             "the graph build. By default, semantically-equivalent topic labels "
+             "(embedding cosine >= --merge-threshold) merge into one canonical "
              "topic each, so the same idea worded differently across books "
-             "becomes ONE graph node. Off by default: it writes canonical_id "
-             "values to the topics table (reversible - no rows or chunk links "
-             "are deleted, and re-running is safe/idempotent).")
+             "becomes ONE graph node - this is what makes real cross-book edges "
+             "form. The pass writes only canonical_id values (reversible - no "
+             "rows or chunk links are deleted; re-running is safe/idempotent) "
+             "and costs seconds on small libraries, roughly 12 minutes on a "
+             "very large (~225K-topic) one. Use this flag to opt out, e.g. to "
+             "rebuild edges quickly without re-scanning topic similarity.")
     parser.add_argument(
         "--merge-threshold", type=float, default=0.90,
         help="Cosine similarity above which two topic labels merge "
@@ -61,8 +65,9 @@ def main():
     console.print("\n[bold cyan]Phase 3: Graph Construction Pipeline[/bold cyan]\n")
 
     with get_db() as db:
-        # Step 0 (optional): Topic canonicalization
-        if args.canonicalize_topics:
+        # Step 0 (default ON, opt out with --no-canonicalize): merge
+        # near-duplicate topic labels so cross-book edges can form.
+        if not args.no_canonicalize:
             console.print("[bold]Step 0: Canonicalizing near-duplicate topics...[/bold]")
             canon_stats = canonicalize_topics(
                 db,
@@ -144,12 +149,18 @@ def main():
             "expected on a small or highly varied library. Trail selection will fall back to "
             "novelty ranking + embedding similarity, which still produces strong trails. The "
             "graph's role grows as your library does.")
-        if not args.canonicalize_topics:
+        if args.no_canonicalize:
             console.print(
-                "[yellow]Tip:[/yellow] re-run with [bold]--canonicalize-topics[/bold] to merge "
-                "near-duplicate topic labels (\"nature of happiness\" / \"nature of true "
-                "happiness\") into single nodes - on small libraries this is usually what "
-                "unlocks real cross-book edges.")
+                "[yellow]Tip:[/yellow] you passed [bold]--no-canonicalize[/bold] - re-run "
+                "without it so near-duplicate topic labels (\"nature of happiness\" / "
+                "\"nature of true happiness\") merge into single nodes. On small libraries "
+                "that merge is usually what unlocks real cross-book edges.")
+        else:
+            console.print(
+                "[yellow]Tip:[/yellow] canonicalization already ran (it's on by default). "
+                "If your books genuinely share themes, a slightly more aggressive merge "
+                "can help: [bold]--merge-threshold 0.85[/bold] (best paired with "
+                "[bold]--merge-max-cluster 6[/bold] to keep transitive chains in check).")
     console.print(
         "\n[bold]Next:[/bold] generate a trail, e.g.\n"
         "  python -m src.agent.trail_generator --idea \"how should power be limited?\"")

@@ -12,8 +12,12 @@ from src.extraction.topic_extractor import TopicExtractor
 from src.extraction.usefulness_filter import UsefulnessFilter
 from src.database.operations import get_db
 from src.config import TOPICS_PER_CHUNK
+from src.llm.client import get_client
 
 console = Console()
+
+# How often to print a running LLM-call count during a long ingest.
+CALL_COUNT_PRINT_EVERY = 25
 
 
 def get_books_without_topics():
@@ -74,8 +78,9 @@ def extract_topics_for_book(book_id: int, book_title: str, progress_task=None, p
             progress.update(progress_task, total=len(chunks))
 
         all_topics = set()
+        llm_client = get_client()  # shared, cached - same instance topic_extractor uses
 
-        for chunk_id, chunk_text in chunks:
+        for i, (chunk_id, chunk_text) in enumerate(chunks, 1):
             # DISABLED: Skip usefulness filter - extract from all chunks
             # is_useful = usefulness_filter.is_useful(chunk_text)
             is_useful = True  # Always process all chunks
@@ -99,7 +104,14 @@ def extract_topics_for_book(book_id: int, book_title: str, progress_task=None, p
             if progress and progress_task:
                 progress.advance(progress_task)
 
+            if i % CALL_COUNT_PRINT_EVERY == 0 and not progress:
+                # Only print standalone (not under a rich Progress bar, which
+                # already renders live state and would fight with a bare print).
+                console.print(f"  [dim]  ...{i}/{len(chunks)} chunks, "
+                              f"{llm_client.call_count} LLM calls so far[/dim]")
+
         stats['unique_topics'] = len(all_topics)
+        stats['llm_calls'] = llm_client.call_count
 
         # Update book stats
         db.update_book_stats(
@@ -205,6 +217,7 @@ def main():
     console.print(f"  Total chunks: {overall_stats['total_chunks']:,}")
     console.print(f"  Topics extracted: {overall_stats['total_topics']:,}")
     console.print(f"  Average topics per book: {overall_stats['total_unique_topics'] / overall_stats['books_processed']:.1f}")
+    console.print(f"  LLM calls made: {get_client().call_count:,}")
 
     # Show database stats
     console.print("\n[bold]Updated Database Statistics:[/bold]")

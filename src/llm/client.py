@@ -92,6 +92,17 @@ class LLMClient:
                  api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.provider = (provider or os.getenv("LLM_PROVIDER") or DEFAULT_PROVIDER).strip().lower()
 
+        # Running count of actual provider API calls made through this client (every
+        # attempt, including retries - a retry is a real network call and a real
+        # request against the provider, so it counts). Deliberately just a count, not
+        # token/dollar accounting: neither provider SDK response is parsed for usage
+        # here, and a call count is enough to make a long ingestion run's spend
+        # visible without adding per-provider pricing/token bookkeeping. `get_client()`
+        # is lru_cache'd, so every caller in a process (topic extraction, usefulness
+        # filtering, trail generation, ...) that doesn't pass a distinct `model=`
+        # shares one instance and therefore one running count.
+        self.call_count = 0
+
         if self.provider == "anthropic":
             import anthropic
             key = api_key or os.getenv("ANTHROPIC_API_KEY")
@@ -139,6 +150,7 @@ class LLMClient:
         last_err: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             try:
+                self.call_count += 1
                 if self.provider == "anthropic":
                     return self._complete_anthropic(system, prompt, max_tokens, temperature)
                 return self._complete_openai(system, prompt, max_tokens, temperature)
@@ -227,6 +239,7 @@ class LLMClient:
         last_err: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             try:
+                self.call_count += 1
                 if self.provider == "anthropic":
                     data = self._complete_json_anthropic(
                         system, prompt, tokens, schema, tool_name, tool_description)

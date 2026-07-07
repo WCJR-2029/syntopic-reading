@@ -19,7 +19,7 @@ This script ORCHESTRATES already-proven units; it does not reimplement them:
   - process_with_topics.process_book_with_topics  (chunks + topics for a fresh book)
   - extract_missing_topics.extract_topics_for_book (topics for an already-chunked book)
   - refresh_embeddings_and_vec.py                  (incremental embed + vec rebuild)
-  - build_graph.py                                 (PMI / clustering / novelty)
+  - build_graph.py                                 (canonicalize / PMI / clustering / novelty)
 """
 
 import os

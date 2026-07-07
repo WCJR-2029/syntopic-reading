@@ -4,6 +4,11 @@ import math
 from typing import Dict, List, Tuple, Set
 from collections import defaultdict, Counter
 
+from src.graph.canonical_resolve import (
+    CHUNK_TOPICS_CANONICAL_VIEW,
+    ensure_canonical_views,
+)
+
 
 class CooccurrenceAnalyzer:
     """Calculate co-occurrence statistics and PMI for topic pairs"""
@@ -144,18 +149,18 @@ def build_cooccurrence_edges(db_connection, min_cooccurrence: int = 2, min_pmi: 
 
     print("\nBuilding co-occurrence graph...")
 
-    # Step 1: Get chunk-topic relationships, resolved to CANONICAL topics.
-    # A topic that was merged by the canonicalization pass (canonical_id set)
-    # contributes its chunk links to its canonical topic - this is what lets
-    # the same idea, worded differently across books, co-occur as ONE node.
-    # With no merged topics (canonical_id all NULL) this is identical to the
-    # old canonical-only query.
+    # Step 1: Get chunk-topic relationships, resolved to CANONICAL topics via
+    # the shared resolution view (src/graph/canonical_resolve.py). A topic that
+    # was merged by the canonicalization pass contributes its chunk links to
+    # its canonical topic - this is what lets the same idea, worded differently
+    # across books, co-occur as ONE node. With no merged topics the view is the
+    # identity mapping and this is identical to the old canonical-only query.
     print("  Loading chunk-topic data (resolving aliases to canonical topics)...")
-    cursor.execute("""
-        SELECT ct.chunk_id, COALESCE(t.canonical_id, t.id) AS topic_id
-        FROM chunk_topics ct
-        JOIN topics t ON ct.topic_id = t.id
-        ORDER BY ct.chunk_id
+    ensure_canonical_views(cursor)
+    cursor.execute(f"""
+        SELECT chunk_id, topic_id
+        FROM {CHUNK_TOPICS_CANONICAL_VIEW}
+        ORDER BY chunk_id
     """)
 
     # Group by chunk_id
@@ -171,15 +176,13 @@ def build_cooccurrence_edges(db_connection, min_cooccurrence: int = 2, min_pmi: 
     cooccurrence = analyzer.calculate_cooccurrence(chunk_topics_list)
     print(f"  Found {len(cooccurrence)} topic pairs")
 
-    # Step 3: Get topic frequencies (also resolved through canonical_id so
+    # Step 3: Get topic frequencies (also resolved through the view so
     # P(topic) counts every chunk the merged idea appears in)
     print("  Loading topic frequencies...")
-    cursor.execute("""
-        SELECT COALESCE(t.canonical_id, t.id) AS topic_id,
-               COUNT(DISTINCT ct.chunk_id) as chunk_count
-        FROM topics t
-        JOIN chunk_topics ct ON t.id = ct.topic_id
-        GROUP BY COALESCE(t.canonical_id, t.id)
+    cursor.execute(f"""
+        SELECT topic_id, COUNT(DISTINCT chunk_id) as chunk_count
+        FROM {CHUNK_TOPICS_CANONICAL_VIEW}
+        GROUP BY topic_id
     """)
     topic_counts = {topic_id: count for topic_id, count in cursor.fetchall()}
 

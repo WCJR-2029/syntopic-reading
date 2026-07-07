@@ -134,6 +134,7 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_chunks_book ON chunks(book_id);",
     "CREATE INDEX IF NOT EXISTS idx_chunks_useful ON chunks(is_useful);",
     "CREATE INDEX IF NOT EXISTS idx_topics_label ON topics(label);",
+    "CREATE INDEX IF NOT EXISTS idx_topics_canonical ON topics(canonical_id);",
     "CREATE INDEX IF NOT EXISTS idx_topics_frequency ON topics(frequency DESC);",
     "CREATE INDEX IF NOT EXISTS idx_topics_hierarchy ON topics(hierarchy_level, parent_topic_id);",
     "CREATE INDEX IF NOT EXISTS idx_chunk_topics_chunk ON chunk_topics(chunk_id);",

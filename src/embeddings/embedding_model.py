@@ -1,8 +1,29 @@
 """Embedding model for generating topic vectors"""
 
+import logging
+import warnings
+
 import numpy as np
 from typing import List, Union
 from sentence_transformers import SentenceTransformer
+
+# Two known-harmless warnings on an otherwise clean run, silenced narrowly (not a
+# blanket filter - both are scoped by category + message/logger so a real, unrelated
+# warning from either library still surfaces):
+#   1. Some sentence-transformers/transformers versions emit a FutureWarning off
+#      get_sentence_embedding_dimension() as they migrate its internals; harmless
+#      here since we only ever use the returned int.
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    message=r".*get_sentence_embedding_dimension.*",
+)
+#   2. huggingface_hub's HTTP layer logs an "unauthenticated requests" / HF_TOKEN
+#      rate-limit notice on every model metadata check. It's not a `warnings`-module
+#      warning (so filterwarnings above doesn't reach it) - it's a stdlib `logging`
+#      call from huggingface_hub.utils._http. Public demo/anonymous usage is the
+#      expected default for this project, so it's not actionable noise.
+logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
 
 
 class EmbeddingModel:

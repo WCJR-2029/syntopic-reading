@@ -97,7 +97,8 @@ The tool ingests **DRM-free EPUB** files. To add your own books legally and get 
 # 1. Add each book (repeat for every EPUB you're adding):
 python scripts/add_book.py /path/to/your-book.epub
 
-# 2. After a batch of adds, rebuild the cross-book topic graph once:
+# 2. After a batch of adds, rebuild the cross-book topic graph once
+#    (this also merges near-duplicate topic labels by default - see below):
 python scripts/build_graph.py
 
 # 3. Generate a trail across your library:
@@ -153,14 +154,19 @@ EPUB → parse & chunk → topic extraction (your LLM) → embeddings (all-MiniL
 - **Embeddings:** `all-MiniLM-L6-v2` (384-dim, runs locally, English) - no API.
 - **Metadata:** uses Calibre's `ebook-meta` if present for cleaner title/author; degrades gracefully
   to the filename if not (Calibre is a recommended, not required, dependency).
-- **Topic graph on small libraries - be aware:** the PMI/Leiden cross-book graph only forms edges
-  where the *same* topic recurs across books. Topic labels are LLM-generated and tend to be nearly
-  unique per book, so on a small or highly varied library the graph is **sparse** (the ~5-6 book
-  demo produces very few edges) and `build_graph.py` will say so. When that happens, trail selection
-  falls back to **novelty ranking + embedding similarity**, which still produces strong cross-book
-  trails - the demo runs entirely this way. The graph's contribution grows with library size and
-  thematic overlap. (Denser cross-book linking on small libraries is on the roadmap - see
-  [ROADMAP.md](ROADMAP.md).)
+- **Topic graph and topic canonicalization:** the PMI/Leiden cross-book graph only forms edges
+  where the *same* topic recurs across books, but topic labels are LLM-generated and tend to be
+  nearly unique per book. To compensate, `build_graph.py` **canonicalizes topics by default**: it
+  merges semantically-equivalent labels ("nature of happiness" / "nature of true happiness") into
+  one canonical topic before building edges, which is what lets the same idea worded differently
+  across books become one graph node (on the demo library this takes edges from 20 to 50).
+  The pass is reversible (it only sets `canonical_id`; no rows or chunk links are deleted),
+  idempotent, and costs seconds on small libraries - budget roughly **12 extra minutes** on a very
+  large (~225K-topic) one. Opt out with `--no-canonicalize`; tune with `--merge-threshold`
+  (default 0.90). Even so, on a small or highly varied library the graph can still be **sparse**
+  and `build_graph.py` will say so - trail selection then falls back to **novelty ranking +
+  embedding similarity**, which still produces strong cross-book trails. The graph's contribution
+  grows with library size and thematic overlap.
 
 ## What it is / isn't
 

@@ -5,6 +5,12 @@ import click
 from src.database.operations import get_db
 from src.database.vector_store import VectorStore
 from src.embeddings.embedding_model import EmbeddingModel
+from src.graph.canonical_resolve import (
+    TOPIC_CANONICAL_MAP_VIEW,
+    cluster_frequency,
+    ensure_canonical_views,
+    resolve_canonical,
+)
 from src.utils.xml_formatter import XMLFormatter
 from src.config import DATABASE_PATH
 
@@ -26,15 +32,28 @@ def keyword(query, limit, min_frequency, format):
     with get_db() as db:
         cursor = db.conn.cursor()
 
-        # Search topics
-        cursor.execute("""
-            SELECT t.id, t.label, t.frequency
-            FROM topics t
-            LEFT JOIN novelty_scores ns ON t.id = ns.topic_id
-            WHERE t.canonical_id IS NULL
-            AND t.label LIKE ?
-            AND t.frequency >= ?
-            ORDER BY t.frequency DESC
+        # Search topics. The LIKE runs against EVERY label - canonical AND
+        # alias - and each hit resolves to its canonical topic (via the shared
+        # canonical-resolution views), so a topic merged under a different
+        # wording is still findable by its alias's words. Frequency is the
+        # cluster total (canonical + all aliases), and the same cluster is
+        # never listed twice even if several of its wordings match.
+        ensure_canonical_views(cursor)
+        cursor.execute(f"""
+            WITH matched AS (
+                SELECT DISTINCT m.canonical_id
+                FROM topics t
+                JOIN {TOPIC_CANONICAL_MAP_VIEW} m ON m.topic_id = t.id
+                WHERE t.label LIKE ?
+            )
+            SELECT c.id, c.label, SUM(f.frequency) AS cluster_freq
+            FROM matched
+            JOIN topics c ON c.id = matched.canonical_id
+            JOIN {TOPIC_CANONICAL_MAP_VIEW} fm ON fm.canonical_id = matched.canonical_id
+            JOIN topics f ON f.id = fm.topic_id
+            GROUP BY c.id, c.label
+            HAVING SUM(f.frequency) >= ?
+            ORDER BY cluster_freq DESC
             LIMIT ?
         """, (f"%{query}%", min_frequency, limit))
 
@@ -96,22 +115,38 @@ def similar(query, limit, format):
             click.echo(f"No topics found similar to '{query}'")
         return
 
-    # Get additional topic data
+    # Get additional topic data. Vector hits may include alias topics (the
+    # sqlite-vec index is pruned best-effort after a merge, so it can be
+    # stale) - resolve every hit to its canonical topic, drop duplicates
+    # (nearest wording wins), and report the cluster-total frequency.
     with get_db() as db:
         cursor = db.conn.cursor()
 
         topics = []
+        seen_canonical = set()
         for topic_id, label, distance in results:
-            cursor.execute("SELECT frequency FROM topics WHERE id = ?", (topic_id,))
-            freq_result = cursor.fetchone()
-            frequency = freq_result[0] if freq_result else 1
+            canonical_id = resolve_canonical(cursor, topic_id)
+            if canonical_id is None:
+                canonical_id = topic_id
+            if canonical_id in seen_canonical:
+                continue
+            seen_canonical.add(canonical_id)
 
-            cursor.execute("SELECT mean_knn_distance FROM novelty_scores WHERE topic_id = ?", (topic_id,))
+            if canonical_id != topic_id:
+                row = cursor.execute(
+                    "SELECT label FROM topics WHERE id = ?", (canonical_id,)
+                ).fetchone()
+                if row:
+                    label = row[0]
+
+            frequency = cluster_frequency(cursor, canonical_id) or 1
+
+            cursor.execute("SELECT mean_knn_distance FROM novelty_scores WHERE topic_id = ?", (canonical_id,))
             novelty_result = cursor.fetchone()
             novelty = novelty_result[0] if novelty_result else None
 
             topics.append({
-                "id": topic_id,
+                "id": canonical_id,
                 "label": label,
                 "frequency": frequency,
                 "novelty": novelty,
@@ -121,9 +156,9 @@ def similar(query, limit, format):
     # Output
     if format == "xml":
         formatter = XMLFormatter()
-        click.echo(formatter.format_topics(topics, total=len(results)))
+        click.echo(formatter.format_topics(topics, total=len(topics)))
     else:
-        click.echo(f"\nTop {len(results)} topics similar to '{query}':\n")
+        click.echo(f"\nTop {len(topics)} topics similar to '{query}':\n")
         for i, topic in enumerate(topics, 1):
             novelty_str = f"{topic['novelty']:.4f}" if topic['novelty'] else "N/A"
             click.echo(f"{i:2d}. {topic['label']}")
@@ -168,11 +203,13 @@ def novel(limit, percentile, format):
 
         results = cursor.fetchall()
 
+        # frequency reported as the cluster total (canonical + aliases) so a
+        # merged idea isn't under-counted by its canonical row alone
         topics = [
             {
                 "id": topic_id,
                 "label": label,
-                "frequency": frequency,
+                "frequency": cluster_frequency(cursor, topic_id) or frequency,
                 "novelty": novelty
             }
             for topic_id, label, frequency, novelty in results
@@ -223,7 +260,7 @@ def hubs(limit, format):
                 click.echo("No hub topics found")
             return
 
-        # Get novelty scores
+        # Get novelty scores (frequency = cluster total, see `novel`)
         topics = []
         for topic_id, label, frequency, degree in results:
             cursor.execute("SELECT mean_knn_distance FROM novelty_scores WHERE topic_id = ?", (topic_id,))
@@ -233,7 +270,7 @@ def hubs(limit, format):
             topics.append({
                 "id": topic_id,
                 "label": label,
-                "frequency": frequency,
+                "frequency": cluster_frequency(cursor, topic_id) or frequency,
                 "novelty": novelty,
                 "degree": degree
             })

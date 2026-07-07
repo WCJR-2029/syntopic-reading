@@ -5,10 +5,20 @@ before PMI/Leiden graph construction, so the same idea worded differently across
 books ("princely cruelty and mercy" ≈ "a ruler's severity" ≈ "cruelty in a
 prince") becomes ONE node the graph can link across those books.
 
-**Entry point:** `python scripts/build_graph.py --canonicalize-topics
-[--merge-threshold 0.90] [--merge-knn 10] [--merge-max-cluster N]`
-(off by default — the flag opts in; without it the pipeline behaves exactly as
-before on databases with no merged topics).
+**Entry point:** `python scripts/build_graph.py
+[--merge-threshold 0.90] [--merge-knn 10] [--merge-max-cluster N]
+[--no-canonicalize]`
+(**on by default** — the pass runs before every graph build; `--no-canonicalize`
+opts out, e.g. to rebuild edges quickly without re-scanning topic similarity.
+The scan costs seconds on a small library and ~12 minutes / <1 GB peak RAM on a
+very large ~225K-topic one, measured on the real library.)
+
+**Resolution contract:** `src/graph/canonical_resolve.py` is the single home
+of the read-time rule — a topic id/label resolves UP to
+`COALESCE(canonical_id, id)`, and a canonical topic's chunk lookups expand
+DOWN over its whole alias cluster. Every consumer (co-occurrence, trail
+research, topic search CLI, ideation) routes through its helpers or TEMP
+views; none hand-writes the SQL.
 
 **Module:** `src/graph/canonicalize.py` (supersedes the all-pairs
 `src/extraction/deduplicator.py`, which computes a full N×N
@@ -131,28 +141,47 @@ paired with `--merge-max-cluster` to cap chains.
 
 ## How canonical_id + chunk_topics resolution works
 
-`chunk_topics` is **never rewritten**. Aliases are resolved at read time:
+`chunk_topics` is **never rewritten**. Aliases are resolved at read time, and
+the resolution rule lives in exactly one module —
+**`src/graph/canonical_resolve.py`** — as per-id helpers (`resolve_canonical`,
+`resolve_label`, `canonical_cluster_ids`, `cluster_frequency`) and two TEMP
+views for bulk SQL (`topic_canonical_map(topic_id, canonical_id)` and
+`chunk_topics_canonical(chunk_id, topic_id)`). Consumers never hand-write
+`COALESCE(canonical_id, id)`; a `grep -rn COALESCE src/ scripts/` finds it
+only inside the resolver module. How each consumer routes through it:
 
-- **Co-occurrence** (`src/graph/cooccurrence.py`): chunk→topic links load as
-  `COALESCE(t.canonical_id, t.id)`, so a chunk tagged with any wording of an
-  idea counts toward the ONE canonical node; topic frequencies group the same
-  way, keeping PMI probabilities consistent. (This also fixes a latent bug:
-  the old query *dropped* alias-linked chunks entirely instead of resolving
-  them.) With zero aliases the queries are equivalent to the old ones.
+- **Co-occurrence** (`src/graph/cooccurrence.py`): chunk→topic links and topic
+  frequencies both load from the `chunk_topics_canonical` view, so a chunk
+  tagged with any wording of an idea counts toward the ONE canonical node and
+  PMI probabilities stay consistent. With zero aliases the view is the
+  identity mapping — the queries are equivalent to the old ones.
 - **Graph / Leiden / novelty**: already operate on `canonical_id IS NULL`
   topics — they inherit the merged world with no changes.
-- **Trail research** (`src/agent/research.py`): exact-label lookup returns
-  `COALESCE(canonical_id, id)` (an alias's label resolves to its canonical
-  topic), semantic hits resolve the same way, and chunk lookup expands a
-  canonical id back over its whole cluster
-  (`ct.topic_id IN (SELECT id FROM topics WHERE id = ? OR canonical_id = ?)`) —
-  so every chunk reachable before a merge stays reachable after it.
-- **Anchored retrieval / ideation** join `topics` rows directly by id and
-  alias rows keep their embeddings, so those paths are unaffected.
+- **Trail research** (`src/agent/research.py`): exact-label lookup goes
+  through `resolve_label` (an alias's label resolves to its canonical topic),
+  semantic hits through `resolve_canonical`, and chunk lookup expands a
+  canonical id back over its whole cluster via `canonical_cluster_ids` — so
+  every chunk reachable before a merge stays reachable after it.
+- **Topic search CLI** (`src/cli/topic_search.py`): `keyword` matches
+  canonical **and alias** labels and returns the canonical topic once, with
+  the cluster-total frequency (pre-fix, a topic merged under a different
+  wording was unfindable by its alias's words); `similar` resolves stale
+  alias hits from the vec index and de-duplicates onto canonicals;
+  `novel`/`hubs` report cluster-total frequencies.
+- **Ideation** (`src/agent/ideation.py`): the book-span gate counts books over
+  the `chunk_topics_canonical` view (pre-fix, a merged topic's span was
+  undercounted and it was wrongly dropped below the ≥4-book minimum), and the
+  freshness probe expands over `canonical_cluster_ids`.
+- **Anchored retrieval** joins `topics` rows directly by id and alias rows
+  keep their embeddings, so that path is unaffected.
+
+A supporting index, `idx_topics_canonical ON topics(canonical_id)`, ships in
+the schema and is also created (idempotently) by the canonicalization pass, so
+cluster expansion stays cheap on pre-existing databases.
 
 ## Results (5-book demo, `verify.db` copy)
 
-| Metric | Before | After (`--canonicalize-topics`, 0.90) |
+| Metric | Before | After (default pass, threshold 0.90) |
 |---|---|---|
 | Rows in `topics` | 2,482 | 2,482 (nothing deleted) |
 | Canonical topics | 2,482 | 2,272 (210 aliases, 138 clusters, max 9) |

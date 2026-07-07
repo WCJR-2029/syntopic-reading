@@ -5,6 +5,11 @@ from typing import List, Dict, Optional
 from src.database.operations import get_db
 from src.config import TRAILS_DIR
 from src.llm.client import get_client
+from src.graph.canonical_resolve import (
+    CHUNK_TOPICS_CANONICAL_VIEW,
+    canonical_cluster_ids,
+    ensure_canonical_views,
+)
 from src.agent.trail_constraints import (
     build_existing_trail_corpus,
     count_excerpt_appearances,
@@ -83,19 +88,29 @@ class IdeationAgent:
 
             # Over-fetch: we further drop reuse-exhausted topics below, so ask for
             # well more than `limit`.
+            #
+            # book_span counts books over the CANONICAL chunk mapping (the
+            # shared chunk_topics_canonical view), so a topic merged from
+            # several wordings gets credit for every book any of its aliases
+            # appears in - without this, a merged topic's span is undercounted
+            # and it's wrongly dropped below MIN_BOOK_SPAN.
             fetch_n = max(limit * 8, 80)
-            cursor.execute("""
+            ensure_canonical_views(cursor)
+            cursor.execute(f"""
                 SELECT t.id, t.label, t.frequency, ns.mean_knn_distance,
-                       (SELECT COUNT(DISTINCT ch.book_id)
-                        FROM chunk_topics ct
-                        JOIN chunks ch ON ct.chunk_id = ch.id
-                        WHERE ct.topic_id = t.id) AS book_span
+                       bs.book_span
                 FROM topics t
                 JOIN novelty_scores ns ON t.id = ns.topic_id
+                JOIN (
+                    SELECT ctc.topic_id AS topic_id,
+                           COUNT(DISTINCT ch.book_id) AS book_span
+                    FROM {CHUNK_TOPICS_CANONICAL_VIEW} ctc
+                    JOIN chunks ch ON ctc.chunk_id = ch.id
+                    GROUP BY ctc.topic_id
+                ) bs ON bs.topic_id = t.id
                 WHERE t.canonical_id IS NULL
                 AND ns.mean_knn_distance >= ?
-                GROUP BY t.id
-                HAVING book_span >= ?
+                AND bs.book_span >= ?
                 ORDER BY ns.mean_knn_distance DESC
                 LIMIT ?
             """, (threshold, MIN_BOOK_SPAN, fetch_n))
@@ -145,16 +160,20 @@ class IdeationAgent:
         A chunk is "fresh" if it appears in fewer than max_appearances existing
         trails — i.e., there's still room for it under the gate's overuse cap.
         Uses the shared corpus + fingerprint logic so ideation, research, and the
-        quality gate all agree on what "used up" means.
+        quality gate all agree on what "used up" means. Chunk lookup expands over
+        the topic's whole alias cluster (canonical_cluster_ids), so chunks tagged
+        under a merged wording still count toward freshness.
         """
-        cursor.execute("""
+        cluster_ids = canonical_cluster_ids(cursor, topic_id) or [topic_id]
+        placeholders = ",".join("?" * len(cluster_ids))
+        cursor.execute(f"""
             SELECT c.text
             FROM chunks c
             JOIN chunk_topics ct ON c.id = ct.chunk_id
-            WHERE ct.topic_id = ?
+            WHERE ct.topic_id IN ({placeholders})
             ORDER BY c.book_id, c.chunk_index
             LIMIT 40
-        """, (topic_id,))
+        """, cluster_ids)
         for (text,) in cursor.fetchall():
             if count_excerpt_appearances(text, corpus) < max_appearances:
                 return True

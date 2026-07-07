@@ -6,7 +6,8 @@ clusters semantically-equivalent labels by embedding similarity and merges
 each cluster into ONE canonical topic by setting ``topics.canonical_id`` on
 the other members (aliases). Nothing is deleted: alias rows, their embeddings,
 and all ``chunk_topics`` links stay in place - downstream consumers resolve
-through ``COALESCE(canonical_id, id)`` (see ``src/graph/cooccurrence.py``).
+aliases at read time through the shared helpers/views in
+``src/graph/canonical_resolve.py`` (the single home of the resolution rule).
 
 Scale safety (the hard constraint - the real library has ~218K topics):
 
@@ -392,7 +393,14 @@ def canonicalize_topics(
         return stats
 
     # 4. Write merges. Alias rows are NEVER deleted and chunk_topics is never
-    #    touched - resolution happens at read time via COALESCE(canonical_id, id).
+    #    touched - resolution happens at read time through the shared helpers
+    #    in src/graph/canonical_resolve.py (COALESCE(canonical_id, id) + alias-
+    #    cluster expansion). Ensure the index that makes cluster expansion
+    #    (WHERE canonical_id = ?) cheap exists even on databases created before
+    #    it was added to the schema.
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_topics_canonical ON topics(canonical_id)"
+    )
     cursor.executemany(
         "UPDATE topics SET canonical_id = ? WHERE id = ?",
         alias_to_canonical,

@@ -73,10 +73,17 @@ DEMO_BOOKS = [
         "filename": "aristotle-nicomachean-ethics.epub",
     },
     {
+        # Gutenberg ID 1232 (W. K. Marriott translation) was the original pick here,
+        # but that edition bundles a second, unrelated work - "The Life of Castruccio
+        # Castracani of Lucca" - appended after The Prince's own ending, which the
+        # chunker/topic pipeline has no way to know isn't part of The Prince. ID 57037
+        # (Luigi Ricci translation) is The Prince ONLY: its last content file ends on
+        # "THE END" straight into the standard Gutenberg license boilerplate, verified
+        # by hand (see module docstring's verification method) - no appended work.
         "title": "The Prince",
         "author": "Niccolò Machiavelli",
-        "gutenberg_id": 1232,
-        "url": "https://www.gutenberg.org/cache/epub/1232/pg1232.epub",
+        "gutenberg_id": 57037,
+        "url": "https://www.gutenberg.org/cache/epub/57037/pg57037.epub",
         "filename": "machiavelli-the-prince.epub",
     },
     {

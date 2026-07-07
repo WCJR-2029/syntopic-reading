@@ -5,6 +5,11 @@ from typing import List, Dict, Optional
 from src.database.operations import get_db
 from src.config import MAX_EXCERPTS_PER_TRAIL, TRAILS_DIR
 from src.llm.client import get_client
+from src.graph.canonical_resolve import (
+    canonical_cluster_ids,
+    resolve_canonical,
+    resolve_label,
+)
 from src.agent.trail_constraints import (
     build_existing_trail_corpus,
     count_excerpt_appearances,
@@ -69,9 +74,10 @@ class ResearchAgent:
         matching collapses a trail onto whichever single book owns the one matching
         label. Exact matches still rank first (semantic distance 0.0).
 
-        All hits resolve through ``canonical_id``: if a label was merged into a
-        canonical topic by the canonicalization pass, the canonical topic's ID is
-        returned (chunk lookup then expands back over the whole merged cluster)."""
+        All hits resolve through the shared canonical-resolution helpers
+        (src/graph/canonical_resolve.py): if a label was merged into a canonical
+        topic by the canonicalization pass, the canonical topic's ID is returned
+        (chunk lookup then expands back over the whole merged cluster)."""
         ids: List[int] = []
         seen = set()
 
@@ -84,26 +90,15 @@ class ResearchAgent:
         with get_db() as db:
             cursor = db.conn.cursor()
 
-            def _canonical(tid):
-                row = cursor.execute(
-                    "SELECT COALESCE(canonical_id, id) FROM topics WHERE id = ?",
-                    (tid,),
-                ).fetchone()
-                return row[0] if row else tid
-
             for label in topic_labels:
-                row = cursor.execute(
-                    "SELECT COALESCE(canonical_id, id) FROM topics WHERE label = ? LIMIT 1",
-                    (label,),
-                ).fetchone()
-                if row:
-                    _add(row[0])
+                _add(resolve_label(cursor, label))
                 if store is not None:
                     try:
                         for tid, _lbl, _dist in store.search_by_text(
                             label, k=semantic_k, model=model
                         ):
-                            _add(_canonical(tid))
+                            canon = resolve_canonical(cursor, tid)
+                            _add(canon if canon is not None else tid)
                     except Exception:  # noqa: BLE001 - keep exact matches on failure
                         pass
         return ids
@@ -134,20 +129,21 @@ class ResearchAgent:
             for topic_id in topic_ids:
                 # Get chunks with this topic. topic_id is canonical, so expand
                 # over the whole merged cluster (the topic itself + any aliases
-                # pointing at it) - chunks stay linked to their ORIGINAL topic
-                # rows, so this keeps every chunk reachable after a merge.
-                # With no aliases this reduces to the plain topic_id match.
-                cursor.execute("""
+                # pointing at it) via canonical_cluster_ids - chunks stay linked
+                # to their ORIGINAL topic rows, so this keeps every chunk
+                # reachable after a merge. With no aliases this reduces to the
+                # plain topic_id match.
+                cluster_ids = canonical_cluster_ids(cursor, topic_id) or [topic_id]
+                placeholders = ",".join("?" * len(cluster_ids))
+                cursor.execute(f"""
                     SELECT c.id, c.book_id, c.chunk_index, c.text, c.word_count, b.title, b.author
                     FROM chunks c
                     JOIN chunk_topics ct ON c.id = ct.chunk_id
                     JOIN books b ON c.book_id = b.id
-                    WHERE ct.topic_id IN (
-                        SELECT id FROM topics WHERE id = ? OR canonical_id = ?
-                    )
+                    WHERE ct.topic_id IN ({placeholders})
                     ORDER BY b.title, c.chunk_index
                     LIMIT ?
-                """, (topic_id, topic_id, limit_per_topic))
+                """, (*cluster_ids, limit_per_topic))
 
                 for chunk_id, book_id, chunk_index, text, word_count, book_title, author in cursor.fetchall():
                     if chunk_id in seen_chunk_ids:

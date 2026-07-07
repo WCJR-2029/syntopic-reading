@@ -6,36 +6,49 @@ Here's what's known to be rough and what's planned next - in rough priority orde
 welcome.
 
 ## Planned
-
-### Denser cross-book topic linking on small libraries
-The PMI/Leiden topic graph only forms edges where the *same* topic recurs across books. Because
-topic labels are LLM-generated free text, they're nearly unique per book, so on a small library the
-graph is sparse and trail selection leans on novelty ranking + embedding similarity instead (see the
-note in [README.md](README.md#how-it-works)). The trails are still strong, but the graph isn't
-pulling its weight at small scale.
-
-**The plan:** canonicalize semantically-equivalent topic labels *before* building co-occurrence -
-cluster near-duplicate labels by embedding similarity (e.g. "princely cruelty and mercy" ≈ "a
-ruler's cruelty" ≈ "severity in a prince") and merge them into a shared canonical topic, so the same
-idea in three different books becomes one node the graph can link. This makes PMI edges actually
-form at demo scale. (Global label dedup is quadratic and blows up on very large libraries, so this
-will be scoped and bounded - likely blocked/batched by cluster - rather than run corpus-wide.)
-
-### Cleaner excerpt rendering & source chunking
-- Excerpt bodies currently render with extra blank lines between wrapped source lines; tighten the
-  Markdown so excerpts read as continuous prose.
-- Some public-domain EPUBs bundle multiple works in one file (e.g. Gutenberg's *The Prince* appends
-  *The Life of Castruccio Castracani*); chunking can pick up the appended work as if it were the main
-  text. Detect and split bundled works, or scope chunks to the primary work.
-
-### Spend & progress visibility during ingestion
-Ingesting a book makes ~2 LLM calls per chunk (a usefulness check + topic extraction), so a
-multi-book ingest can run many minutes with no feedback on tokens or cost. Add a running
-call/token counter (and an optional cost estimate) so you can see what a run is spending.
+Nothing currently queued - see [Nice-to-have](#nice-to-have) for smaller open items.
 
 ## Nice-to-have
-- Silence third-party deprecation/warning noise on a clean run.
 - Optional non-English embedding models.
+- **Anchored mode could leverage canonicalization.** `--anchor-book` retrieval
+  (`src/agent/anchored_retrieval.py`) still finds cross-book bridges by exact topic label rather
+  than through `canonical_id`, so it doesn't yet benefit from topic merging the way the default
+  `--idea` path does. It is not *broken* by canonicalization (behaviour is unchanged), just not
+  enhanced by it - routing its bridge and chunk lookups through `canonical_resolve` would let
+  anchored trails span merged topics too.
+
+## Shipped
+- **Denser cross-book topic linking (topic canonicalization)** - `build_graph.py` now merges
+  semantically-equivalent topic labels ("princely cruelty and mercy" ≈ "a ruler's severity") into
+  one canonical topic *by default* before building co-occurrence, so the same idea worded
+  differently across books becomes one graph node (demo library: 20 → 50 edges). Scale-safe
+  (bounded-memory blocked KNN, ~12 min on a ~225K-topic library), reversible, idempotent; opt out
+  with `--no-canonicalize`. Every read path resolves aliases through one shared module
+  (`src/graph/canonical_resolve.py`). Design notes: [DESIGN.md](DESIGN.md).
+- **Cleaner excerpt rendering** - excerpt text carries hard-wrapped line breaks from the source
+  EPUB (a newline at every HTML text-node boundary, including inline tags); `format_trail_markdown`
+  in `src/agent/polish.py` now dewraps them back into real paragraphs before quoting, and quotes
+  every line (including paragraph-break blanks, as a bare `>`) so an excerpt renders as one
+  continuous blockquote instead of dozens of blank-line-separated fragments. Dewrapping runs
+  *before* highlight matching, so a highlight phrase that used to span a line break can match again.
+- **No more appended-work bleed in the demo library** - `bootstrap_demo.py`'s Gutenberg edition of
+  *The Prince* (ID 1232, W. K. Marriott translation) bundled a second work, *The Life of Castruccio
+  Castracani of Lucca*, after The Prince's own ending; chunking had no way to know the appended text
+  wasn't part of The Prince. Switched to Gutenberg ID 57037 (Luigi Ricci translation), verified by
+  hand to be The Prince only (ends on "THE END" straight into the standard license boilerplate).
+- **Silenced known-harmless warnings on a clean run** - three warnings that showed up on an
+  otherwise clean ingest/trail-generation run, each silenced narrowly (not a blanket filter):
+  a sentence-transformers `FutureWarning` off `get_sentence_embedding_dimension()`, huggingface_hub's
+  "unauthenticated requests" HF_TOKEN notice (a `logging` call, not a `warnings` one - silenced by
+  raising that specific logger's level, in `src/embeddings/embedding_model.py`), and the `runpy`
+  `RuntimeWarning` from `python -m src.agent.trail_generator` (caused by `src/agent/__init__.py`
+  eagerly importing `trail_generator`, so runpy finds it already in `sys.modules` - filtered in
+  `src/agent/__init__.py`, before that import runs).
+- **Spend visibility during ingestion** - `LLMClient` (`src/llm/client.py`) now tracks a running
+  count of actual provider calls (every attempt, including retries); `process_with_topics.py` and
+  `extract_missing_topics.py` print it periodically during a long ingest and as a total at the end.
+  Deliberately just a call count, not token/dollar accounting - neither provider SDK response is
+  parsed for usage, so there's nothing invasive to add here.
 
 ## Not planned (by design)
 - This is a personal thinking instrument, not a summarizer or a reading replacement. The synthesis
