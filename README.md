@@ -153,6 +153,14 @@ EPUB → parse & chunk → topic extraction (your LLM) → embeddings (all-MiniL
 - **Embeddings:** `all-MiniLM-L6-v2` (384-dim, runs locally, English) - no API.
 - **Metadata:** uses Calibre's `ebook-meta` if present for cleaner title/author; degrades gracefully
   to the filename if not (Calibre is a recommended, not required, dependency).
+- **Topic graph on small libraries - be aware:** the PMI/Leiden cross-book graph only forms edges
+  where the *same* topic recurs across books. Topic labels are LLM-generated and tend to be nearly
+  unique per book, so on a small or highly varied library the graph is **sparse** (the ~5-6 book
+  demo produces very few edges) and `build_graph.py` will say so. When that happens, trail selection
+  falls back to **novelty ranking + embedding similarity**, which still produces strong cross-book
+  trails - the demo runs entirely this way. The graph's contribution grows with library size and
+  thematic overlap. (Denser cross-book linking on small libraries is on the roadmap - see
+  [ROADMAP.md](ROADMAP.md).)
 
 ## What it is / isn't
 

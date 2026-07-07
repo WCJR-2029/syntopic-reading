@@ -72,6 +72,16 @@ def main():
     console.print(f"Topic Graph: {graph_stats['vertices']} vertices, {graph_stats['edges']} edges")
     console.print(f"Hierarchy: {cluster_stats['total_levels']} levels")
     console.print(f"Novelty: {novelty_stats['total_topics']} topics scored")
+    # Honest signal when the graph is sparse (expected on small/varied libraries):
+    # topic labels are near-unique per book, so PMI finds little to co-occur. Trail
+    # selection falls back to novelty + embeddings and still works well.
+    v, e = graph_stats['vertices'], graph_stats['edges']
+    if v and e < v * 0.05:
+        console.print(
+            "\n[yellow]Note:[/yellow] this topic graph is sparse (few cross-book edges) - "
+            "expected on a small or highly varied library. Trail selection will fall back to "
+            "novelty ranking + embedding similarity, which still produces strong trails. The "
+            "graph's role grows as your library does.")
     console.print(
         "\n[bold]Next:[/bold] generate a trail, e.g.\n"
         "  python -m src.agent.trail_generator --idea \"how should power be limited?\"")

@@ -340,14 +340,41 @@ class LLMClient:
 
     @staticmethod
     def _validate_json_result(data: dict, schema: Optional[dict]) -> None:
-        """Light shape check: required top-level keys from the schema must be
-        present. (Anthropic enforces the full schema server-side; this guards
-        the OpenAI JSON-mode / fallback paths.)"""
+        """Shape check on the parsed result. Required top-level keys must be
+        present, AND any declared array-of-objects property must actually BE a
+        list of objects carrying their required keys.
+
+        The deep check matters: some models return a nested array as a
+        JSON-encoded string or a truncated/partial payload that the normalizer
+        can't repair. Raising LLMJSONError here routes that back into
+        ``complete_json``'s retry loop (which re-requests with a larger token
+        budget) instead of letting a malformed shape reach the caller and burn a
+        whole trail-generation attempt (ghost finding B, 2026-07-07)."""
         if not schema:
             return
         missing = [k for k in schema.get("required", []) if k not in data]
         if missing:
             raise LLMJSONError(f"JSON object missing required key(s): {', '.join(missing)}")
+        for key, spec in schema.get("properties", {}).items():
+            if key not in data or spec.get("type") != "array":
+                continue
+            val = data[key]
+            if not isinstance(val, list):
+                raise LLMJSONError(
+                    f"property '{key}' should be an array but is {type(val).__name__}")
+            item_spec = spec.get("items", {})
+            if item_spec.get("type") != "object":
+                continue
+            item_required = item_spec.get("required", [])
+            for i, item in enumerate(val):
+                if not isinstance(item, dict):
+                    raise LLMJSONError(
+                        f"property '{key}'[{i}] should be an object but is "
+                        f"{type(item).__name__}")
+                item_missing = [k for k in item_required if k not in item]
+                if item_missing:
+                    raise LLMJSONError(
+                        f"property '{key}'[{i}] missing key(s): {', '.join(item_missing)}")
 
     @staticmethod
     def _normalize_structured_json(data: dict, schema: Optional[dict]) -> dict:
