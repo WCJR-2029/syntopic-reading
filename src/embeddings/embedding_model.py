@@ -1,7 +1,13 @@
 """Embedding model for generating topic vectors"""
 
 import logging
+import os
 import warnings
+
+# Silence model-load progress bars (huggingface_hub download bars + the transformers
+# "Loading weights" tqdm) so a clean run has no stray progress noise. Must be set
+# BEFORE importing sentence_transformers/transformers, which read this at import.
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
 import numpy as np
 from typing import List, Union

@@ -88,20 +88,23 @@ class LLMClient:
     while still reading the rest of the config (keys, base_url) from env.
     """
 
+    # Process-wide count of provider API calls (incremented in complete() /
+    # complete_json()). Class-level ON PURPOSE: get_client() is lru_cached per
+    # (provider, model), so the extraction layer (get_client(model=...)) and a
+    # plain get_client() are DIFFERENT cached instances. A per-instance counter
+    # read by one caller silently missed the other's calls (the "Total LLM calls:
+    # 0" bug). A class attribute counts every call across every client in the
+    # process — which is exactly the run-wide spend signal this is meant to give.
+    call_count = 0
+
     def __init__(self, provider: Optional[str] = None, model: Optional[str] = None,
                  api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.provider = (provider or os.getenv("LLM_PROVIDER") or DEFAULT_PROVIDER).strip().lower()
 
-        # Running count of actual provider API calls made through this client (every
-        # attempt, including retries - a retry is a real network call and a real
-        # request against the provider, so it counts). Deliberately just a count, not
-        # token/dollar accounting: neither provider SDK response is parsed for usage
-        # here, and a call count is enough to make a long ingestion run's spend
-        # visible without adding per-provider pricing/token bookkeeping. `get_client()`
-        # is lru_cache'd, so every caller in a process (topic extraction, usefulness
-        # filtering, trail generation, ...) that doesn't pass a distinct `model=`
-        # shares one instance and therefore one running count.
-        self.call_count = 0
+        # (call_count is a process-wide CLASS attribute — see the class body — so a
+        # long run's spend is counted across every client instance, not per cache
+        # key. Deliberately just a count: neither provider SDK response is parsed for
+        # token/dollar usage here, and a call count is enough to make spend visible.)
 
         if self.provider == "anthropic":
             import anthropic
@@ -150,7 +153,7 @@ class LLMClient:
         last_err: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             try:
-                self.call_count += 1
+                LLMClient.call_count += 1
                 if self.provider == "anthropic":
                     return self._complete_anthropic(system, prompt, max_tokens, temperature)
                 return self._complete_openai(system, prompt, max_tokens, temperature)
@@ -239,7 +242,7 @@ class LLMClient:
         last_err: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             try:
-                self.call_count += 1
+                LLMClient.call_count += 1
                 if self.provider == "anthropic":
                     data = self._complete_json_anthropic(
                         system, prompt, tokens, schema, tool_name, tool_description)

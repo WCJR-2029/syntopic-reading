@@ -10,6 +10,11 @@ Nothing currently queued - see [Nice-to-have](#nice-to-have) for smaller open it
 
 ## Nice-to-have
 - Optional non-English embedding models.
+- **Within-book ingest resume.** `add_book.py` resumes at the *book* level (re-running skips
+  finished books), but a book is only committed once fully processed - so a large book (e.g.
+  Aristotle, ~11 min) killed mid-run loses that book's progress and re-ingests from scratch. Persist
+  chunk/topic progress incrementally so an interrupted big book resumes where it left off. (Run long
+  ingests detached, not in a short-timeout foreground, until then.)
 - **Anchored mode could leverage canonicalization.** `--anchor-book` retrieval
   (`src/agent/anchored_retrieval.py`) still finds cross-book bridges by exact topic label rather
   than through `canonical_id`, so it doesn't yet benefit from topic merging the way the default

@@ -13,6 +13,7 @@ from src.graph.canonical_resolve import (
 from src.agent.trail_constraints import (
     build_existing_trail_corpus,
     count_excerpt_appearances,
+    library_aware_thresholds,
 )
 
 
@@ -338,9 +339,18 @@ Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
         # Verify cross-book coverage (matches the stage-3.5 gate's minimum in
         # src/agent/trail_constraints.py: check_minimum_book_diversity)
+        # Soft pre-gate note, kept consistent with the library-aware quality gate:
+        # on a small library the gate's real floor is < 4 books, so only flag when
+        # below THIS library's effective minimum (otherwise a passing 3-book trail
+        # on a 5-book demo printed a scary "target is ≥4" right before "✅ satisfied").
         unique_books = set(e["book_title"] for e in excerpts)
-        if len(unique_books) < 4:
-            print(f"⚠️  Warning: Trail only spans {len(unique_books)} book(s) - target is ≥4")
+        with get_db() as _db:
+            _total_books = _db.conn.cursor().execute(
+                "SELECT COUNT(*) FROM books").fetchone()[0]
+        _min_books, _ = library_aware_thresholds(_total_books)
+        if len(unique_books) < _min_books:
+            print(f"ℹ️  Note: trail spans {len(unique_books)} of a needed {_min_books} "
+                  f"distinct books; the quality gate makes the final call.")
 
         return excerpts
 
