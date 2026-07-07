@@ -189,19 +189,29 @@ Select {MAX_EXCERPTS_PER_TRAIL} excerpts that:
 
 Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
-        # Call the configured LLM
-        response_text = self.client.complete("", prompt, max_tokens=2000)
-
-        # Parse response
-        import json
-
-        # Handle markdown code blocks
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-
-        data = json.loads(response_text)
+        # Call the configured LLM via the structured-JSON path: schema mirrors the
+        # Output Format in the prompt; the client guarantees a parsed object
+        # (tool-use / JSON mode + truncation detection + retries) and raises a
+        # catchable LLMError on terminal failure - never a bare JSONDecodeError
+        # from a truncated 2000-token response.
+        schema = {
+            "type": "object",
+            "properties": {
+                "excerpts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "chunk_number": {"type": "integer"},
+                            "rationale": {"type": "string"},
+                        },
+                        "required": ["chunk_number", "rationale"],
+                    },
+                },
+            },
+            "required": ["excerpts"],
+        }
+        data = self.client.complete_json("", prompt, schema=schema, max_tokens=4096)
         selected_excerpts = data.get("excerpts", [])
 
         # Map chunk numbers back to full chunks

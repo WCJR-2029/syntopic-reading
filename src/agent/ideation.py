@@ -247,19 +247,31 @@ Propose {self.num_ideas} diverse trail ideas. Each trail should:
 
 Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
-        # Call the configured LLM
-        response_text = self.client.complete("", prompt, max_tokens=2000)
-
-        # Parse response
-        import json
-
-        # Handle markdown code blocks if present
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-
-        data = json.loads(response_text)
+        # Call the configured LLM via the structured-JSON path: the schema below
+        # mirrors the Output Format in the prompt, the client guarantees a parsed
+        # object (tool-use / JSON mode + truncation detection + retries), and any
+        # terminal failure surfaces as a catchable LLMError - never a bare
+        # json.JSONDecodeError from a truncated 2000-token response.
+        schema = {
+            "type": "object",
+            "properties": {
+                "trails": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "description": {"type": "string"},
+                            "target_topics": {"type": "array", "items": {"type": "string"}},
+                            "rationale": {"type": "string"},
+                        },
+                        "required": ["title", "description", "target_topics", "rationale"],
+                    },
+                },
+            },
+            "required": ["trails"],
+        }
+        data = self.client.complete_json("", prompt, schema=schema, max_tokens=4096)
         trails = data.get("trails", [])
 
         if not trails:
@@ -310,14 +322,17 @@ Prefer specific, concrete framings over generic abstractions ("architecture of X
 
 Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
-        response_text = self.client.complete("", prompt, max_tokens=500)
-
-        import json
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        data = json.loads(response_text)
+        # Structured-JSON path (see generate_ideas): tiny payload, but the same
+        # guarantee - parsed object or a clear LLMError, never a JSON traceback.
+        schema = {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["title"],
+        }
+        data = self.client.complete_json("", prompt, schema=schema)
 
         return {
             "title": data["title"],

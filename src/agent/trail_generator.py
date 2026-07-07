@@ -13,6 +13,7 @@ from src.agent.trail_constraints import (
     dedupe_and_backfill_excerpts,
 )
 from src.config import TRAILS_DIR
+from src.llm.client import LLMError
 from src.agent import anchored_retrieval as ar
 
 
@@ -148,12 +149,17 @@ class TrailGenerator:
             print("\n   Authoring title/description from the anchor...")
             sample_texts = [a["text"] for a in pack["anchors"]] or \
                            [c["text"] for c in pack["companions"][:2]]
-            trail_idea = self.ideation.generate_anchor_title_desc(
-                anchor_book=pack["anchor_book"],
-                seed_topics=pack["seed_topics"],
-                sample_texts=sample_texts,
-                user_hint=anchor.get("title") or user_idea,
-            )
+            try:
+                trail_idea = self.ideation.generate_anchor_title_desc(
+                    anchor_book=pack["anchor_book"],
+                    seed_topics=pack["seed_topics"],
+                    sample_texts=sample_texts,
+                    user_hint=anchor.get("title") or user_idea,
+                )
+            except (LLMError, ValueError, KeyError) as e:
+                print(f"\n❌ Ideation (anchored title/description) failed: {e}")
+                print("Skipping this trail...")
+                return None
             if anchor.get("title"):
                 trail_idea["title"] = anchor["title"]
             if anchor.get("desc"):
@@ -176,7 +182,12 @@ class TrailGenerator:
                 print(f"Mode: Auto-generate {self.ideation.num_ideas} ideas using novel topics")
 
             print("\nCalling the LLM for ideation...")
-            trail_ideas = self.ideation.generate_ideas(user_idea=user_idea)
+            try:
+                trail_ideas = self.ideation.generate_ideas(user_idea=user_idea)
+            except (LLMError, ValueError) as e:
+                print(f"\n❌ Ideation failed: {e}")
+                print("Skipping this trail...")
+                return None
 
             # Select trail idea
             if trail_index >= len(trail_ideas):
@@ -196,7 +207,7 @@ class TrailGenerator:
 
             try:
                 excerpts = self.research.research_trail(trail_idea)
-            except ValueError as e:
+            except (LLMError, ValueError) as e:
                 print(f"\n❌ Research failed: {e}")
                 print("Skipping this trail idea...")
                 return None
@@ -221,9 +232,14 @@ class TrailGenerator:
         print("-" * 40)
         print("Adding highlights and connection notes...")
 
-        polished_data = self.polish.polish_trail(
-            trail_idea, excerpts, include_synthesis=self.include_synthesis
-        )
+        try:
+            polished_data = self.polish.polish_trail(
+                trail_idea, excerpts, include_synthesis=self.include_synthesis
+            )
+        except (LLMError, ValueError) as e:
+            print(f"\n❌ Polish failed: {e}")
+            print("Skipping this trail (excerpts were selected but could not be polished)...")
+            return None
 
         print(f"\n✅ Polish Complete:")
         print(f"   Highlights added: {sum(len(e.get('highlights', [])) for e in polished_data['polished_excerpts'])}")

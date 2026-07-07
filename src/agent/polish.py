@@ -78,29 +78,35 @@ For each excerpt:
 
 Return ONLY valid JSON - no markdown, no explanations, just the JSON object."""
 
-        # Call the configured LLM. max_tokens has headroom above 3000 (the previous
-        # value) because a full 10-excerpt trail's highlights/setting/connection JSON
-        # can run long enough to get truncated mid-object on some models, which would
-        # otherwise surface as an opaque json.loads crash at this, the final and most
-        # expensive stage of trail generation.
-        response_text = self.client.complete("", prompt, max_tokens=4096)
-
-        # Parse response
-        import json
-
-        # Handle markdown code blocks
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-
-        try:
-            data = json.loads(response_text)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Polish agent: failed to parse the LLM's JSON response ({e}). "
-                f"Response (possibly truncated): {response_text[:500]}"
-            ) from e
+        # Call the configured LLM via the structured-JSON path: schema mirrors the
+        # Output Format in the prompt; the client guarantees a parsed object
+        # (tool-use / JSON mode + truncation detection + retries with escalating
+        # max_tokens) and raises a catchable LLMError on terminal failure. This
+        # replaces the earlier partial hardening (max_tokens=4096 + a wrapped
+        # json.loads) at this, the final and most expensive stage of trail
+        # generation. max_tokens=8192 gives a full 10-excerpt trail's highlights/
+        # setting/connection JSON generous headroom on the first attempt.
+        schema = {
+            "type": "object",
+            "properties": {
+                "polished_excerpts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "sequence_order": {"type": "integer"},
+                            "highlights": {"type": "array", "items": {"type": "string"}},
+                            "setting": {"type": "string"},
+                            "connection_note": {"type": "string"},
+                        },
+                        "required": ["sequence_order", "highlights", "setting",
+                                     "connection_note"],
+                    },
+                },
+            },
+            "required": ["polished_excerpts"],
+        }
+        data = self.client.complete_json("", prompt, schema=schema, max_tokens=8192)
         polished = data.get("polished_excerpts", [])
 
         # Merge polish data back into excerpts

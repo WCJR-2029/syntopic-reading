@@ -57,8 +57,21 @@ account required.
 
 ```bash
 git clone https://github.com/WCJR-2029/syntopic-reading.git && cd syntopic-reading
-pip install -e .
 
+# Create and activate a virtual environment first - a bare `pip install -e .` into
+# system Python fails on modern Debian/Ubuntu/Fedora with a PEP 668
+# "externally-managed-environment" error:
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+pip install -e .
+```
+
+**Heads-up on that install:** it pulls in `sentence-transformers`, which drags along PyTorch and,
+on most Linux machines, several GB of NVIDIA CUDA wheels - even if you're running CPU-only. Expect
+this step to take a few minutes and use a couple of GB of disk, not finish instantly.
+
+```bash
 cp .env.example .env          # then paste your LLM API key into .env
 
 # Fetch ~6 public-domain classics from Project Gutenberg and ingest them:
@@ -81,11 +94,40 @@ The tool ingests **DRM-free EPUB** files. To add your own books legally and get 
 (Calibre / Pandoc) for every OS, legal sources, metadata hygiene, and the corpus size the tool needs.
 
 ```bash
+# 1. Add each book (repeat for every EPUB you're adding):
 python scripts/add_book.py /path/to/your-book.epub
+
+# 2. After a batch of adds, rebuild the cross-book topic graph once:
+python scripts/build_graph.py
+
+# 3. Generate a trail across your library:
+python -m src.agent.trail_generator --idea "your question here"
 ```
 
-`add_book.py` initializes the database on first run and is idempotent - re-running resumes or repairs
-rather than duplicating.
+`add_book.py` initializes the database on first run, is idempotent - re-running resumes or repairs
+rather than duplicating - and already rebuilds the topic graph itself after each book by default, so
+step 2 above is optional if you're only adding one book. Adding several books in one sitting? Pass
+`--defer-graph` to each `add_book.py` call and run `build_graph.py` once at the end instead - that
+rebuilds the (heavyweight, whole-library) graph a single time rather than after every book.
+
+## Trail generator flags
+
+`python -m src.agent.trail_generator` accepts:
+
+- `--idea "<text>"` - the question or theme to build the trail around. Omit it and the tool
+  auto-generates `--num-ideas` (default 5) candidate ideas and picks one itself.
+- `--count N` - how many trails to generate in one run (default 1).
+- `--no-synthesis` - skip the trailing "## The synthesis (draft)" section (saves one LLM call).
+- `--percentile N` - novelty percentile used when selecting topics (default 90).
+- `--no-quality-gate` - bypass the diversity / single-author checks described below and save the
+  trail anyway. Use sparingly - it's a debugging escape hatch, not something to ship trails with.
+
+**Anchored mode** (steer the trail toward a specific book or cross-book bridge instead of a
+free-form idea) adds: `--anchor-book "<title substring>"`, `--anchor-chunks "<csv chunk ids>"`,
+`--seed-topics "<topic;topic>"`, `--title "<text>"`, `--desc "<text>"`,
+`--exclude-books "<title;title>"`, `--k N` (companion excerpts, default 6), and `--per-book N`
+(max excerpts per book, default 1). Run `python -m src.agent.trail_generator --help` for the full
+list with descriptions.
 
 ## How it works
 
@@ -111,6 +153,12 @@ EPUB → parse & chunk → topic extraction (your LLM) → embeddings (all-MiniL
   implementation of a syntopic-reading pipeline.
 - **Isn't:** a summarizer, a replacement for reading, or useful on a single book - trails are
   cross-book by design (the quality gate wants **≥4 books** on a shared theme).
+
+**"No trails generated"?** The quality gate (`src/agent/trail_constraints.py`) rejects any trail
+drawing on fewer than 4 distinct books, or where a single author supplies more than 45% of the
+excerpts. A themed set of at least 5-6 books gives the tool enough range to clear that bar
+reliably; a small or single-author library will often get turned away by the diversity check
+rather than quietly produce a thin trail.
 
 ## Status & maintenance
 
