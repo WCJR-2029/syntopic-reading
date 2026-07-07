@@ -67,7 +67,11 @@ class ResearchAgent:
         books: topic labels are per-chunk LLM output and are almost never shared
         verbatim across books (~0.2% of topics appear in >=2 books), so exact-only
         matching collapses a trail onto whichever single book owns the one matching
-        label. Exact matches still rank first (semantic distance 0.0)."""
+        label. Exact matches still rank first (semantic distance 0.0).
+
+        All hits resolve through ``canonical_id``: if a label was merged into a
+        canonical topic by the canonicalization pass, the canonical topic's ID is
+        returned (chunk lookup then expands back over the whole merged cluster)."""
         ids: List[int] = []
         seen = set()
 
@@ -79,9 +83,17 @@ class ResearchAgent:
         store, model = self._get_vector_search()
         with get_db() as db:
             cursor = db.conn.cursor()
+
+            def _canonical(tid):
+                row = cursor.execute(
+                    "SELECT COALESCE(canonical_id, id) FROM topics WHERE id = ?",
+                    (tid,),
+                ).fetchone()
+                return row[0] if row else tid
+
             for label in topic_labels:
                 row = cursor.execute(
-                    "SELECT id FROM topics WHERE label = ? AND canonical_id IS NULL LIMIT 1",
+                    "SELECT COALESCE(canonical_id, id) FROM topics WHERE label = ? LIMIT 1",
                     (label,),
                 ).fetchone()
                 if row:
@@ -91,7 +103,7 @@ class ResearchAgent:
                         for tid, _lbl, _dist in store.search_by_text(
                             label, k=semantic_k, model=model
                         ):
-                            _add(tid)
+                            _add(_canonical(tid))
                     except Exception:  # noqa: BLE001 - keep exact matches on failure
                         pass
         return ids
@@ -120,16 +132,22 @@ class ResearchAgent:
             cursor = db.conn.cursor()
 
             for topic_id in topic_ids:
-                # Get chunks with this topic
+                # Get chunks with this topic. topic_id is canonical, so expand
+                # over the whole merged cluster (the topic itself + any aliases
+                # pointing at it) - chunks stay linked to their ORIGINAL topic
+                # rows, so this keeps every chunk reachable after a merge.
+                # With no aliases this reduces to the plain topic_id match.
                 cursor.execute("""
                     SELECT c.id, c.book_id, c.chunk_index, c.text, c.word_count, b.title, b.author
                     FROM chunks c
                     JOIN chunk_topics ct ON c.id = ct.chunk_id
                     JOIN books b ON c.book_id = b.id
-                    WHERE ct.topic_id = ?
+                    WHERE ct.topic_id IN (
+                        SELECT id FROM topics WHERE id = ? OR canonical_id = ?
+                    )
                     ORDER BY b.title, c.chunk_index
                     LIMIT ?
-                """, (topic_id, limit_per_topic))
+                """, (topic_id, topic_id, limit_per_topic))
 
                 for chunk_id, book_id, chunk_index, text, word_count, book_title, author in cursor.fetchall():
                     if chunk_id in seen_chunk_ids:

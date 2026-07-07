@@ -1,4 +1,12 @@
-"""Topic deduplication using embedding similarity to merge near-synonyms"""
+"""Topic deduplication using embedding similarity to merge near-synonyms
+
+DEPRECATED for large libraries: this module computes a full N x N cosine
+similarity matrix (O(N^2) memory - it WILL exhaust RAM at real-library scale,
+~218K topics) and re-encodes every label from scratch. Use the scale-safe,
+embedding-reusing pass in ``src/graph/canonicalize.py`` instead
+(``scripts/build_graph.py --canonicalize-topics``). Kept for reference and
+tiny ad-hoc runs only.
+"""
 
 import numpy as np
 from typing import List, Tuple, Dict, Set

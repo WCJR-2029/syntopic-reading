@@ -1,4 +1,6 @@
-"""Build complete topic graph: Co-occurrence → Graph → Clustering → Novelty"""
+"""Build complete topic graph: (Canonicalize) → Co-occurrence → Graph → Clustering → Novelty"""
+
+import argparse
 
 from rich.console import Console
 
@@ -8,6 +10,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)  # so `import src` works run-from-repo without `pip install -e .`
 
 from src.database.operations import get_db
+from src.graph.canonicalize import canonicalize_topics
 from src.graph.cooccurrence import build_cooccurrence_edges
 from src.graph.topic_graph import build_topic_graph
 from src.graph.hierarchical_clustering import build_hierarchical_clustering
@@ -16,14 +19,73 @@ from src.graph.novelty_scoring import calculate_novelty_scores
 console = Console()
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Build the cross-book topic graph (PMI co-occurrence + Leiden clustering)."
+    )
+    parser.add_argument(
+        "--canonicalize-topics", action="store_true",
+        help="Before building the graph, merge semantically-equivalent topic "
+             "labels (embedding cosine >= --merge-threshold) into one canonical "
+             "topic each, so the same idea worded differently across books "
+             "becomes ONE graph node. Off by default: it writes canonical_id "
+             "values to the topics table (reversible - no rows or chunk links "
+             "are deleted, and re-running is safe/idempotent).")
+    parser.add_argument(
+        "--merge-threshold", type=float, default=0.90,
+        help="Cosine similarity above which two topic labels merge "
+             "(default 0.90: rewordings of the same idea; 0.85 is noticeably "
+             "more aggressive and risks merging related-but-distinct topics).")
+    parser.add_argument(
+        "--merge-knn", type=int, default=10,
+        help="Neighbourhood cap for the merge scan: each topic considers at "
+             "most this many nearest neighbours (default 10). Bounds the "
+             "pass at ~O(N*K) memory regardless of library size.")
+    parser.add_argument(
+        "--merge-max-cluster", type=int, default=0,
+        help="Optional hard cap on merged-cluster size (0 = unlimited). "
+             "Guards against transitive over-merge chains at aggressive "
+             "thresholds; when set, re-runs may perform deferred merges.")
+    parser.add_argument(
+        "--min-cooccurrence", type=int, default=2,
+        help="Minimum chunk co-occurrence count for a PMI edge (default 2).")
+    parser.add_argument(
+        "--min-pmi", type=float, default=0.0,
+        help="Minimum PMI score for an edge (default 0.0).")
+    return parser.parse_args()
+
+
 def main():
     """Run complete Phase 3 pipeline"""
+    args = parse_args()
     console.print("\n[bold cyan]Phase 3: Graph Construction Pipeline[/bold cyan]\n")
 
     with get_db() as db:
+        # Step 0 (optional): Topic canonicalization
+        if args.canonicalize_topics:
+            console.print("[bold]Step 0: Canonicalizing near-duplicate topics...[/bold]")
+            canon_stats = canonicalize_topics(
+                db,
+                merge_threshold=args.merge_threshold,
+                knn=args.merge_knn,
+                max_cluster_size=args.merge_max_cluster or None,
+            )
+            console.print("\n[green]✓ Topic Canonicalization Complete[/green]")
+            console.print(f"  Topics scanned: {canon_stats['topics_scanned']}")
+            console.print(f"  Clusters merged: {canon_stats['clusters_merged']}")
+            console.print(f"  Aliases created: {canon_stats['aliases_created']}")
+            console.print(f"  Canonical topics remaining: {canon_stats['canonical_topics_after']}")
+            if canon_stats['sample_clusters']:
+                console.print("  Sample merged clusters (canonical first):")
+                for cluster in canon_stats['sample_clusters'][:8]:
+                    console.print(f"    • {' | '.join(cluster)}")
+            console.print()
+
         # Step 1: Co-occurrence Analysis
         console.print("[bold]Step 1/4: Building co-occurrence edges...[/bold]")
-        cooccur_stats = build_cooccurrence_edges(db, min_cooccurrence=2, min_pmi=0.0)
+        cooccur_stats = build_cooccurrence_edges(
+            db, min_cooccurrence=args.min_cooccurrence, min_pmi=args.min_pmi
+        )
 
         console.print("\n[green]✓ Co-occurrence Analysis Complete[/green]")
         console.print(f"  Total topic pairs: {cooccur_stats['total_topic_pairs']}")
@@ -82,6 +144,12 @@ def main():
             "expected on a small or highly varied library. Trail selection will fall back to "
             "novelty ranking + embedding similarity, which still produces strong trails. The "
             "graph's role grows as your library does.")
+        if not args.canonicalize_topics:
+            console.print(
+                "[yellow]Tip:[/yellow] re-run with [bold]--canonicalize-topics[/bold] to merge "
+                "near-duplicate topic labels (\"nature of happiness\" / \"nature of true "
+                "happiness\") into single nodes - on small libraries this is usually what "
+                "unlocks real cross-book edges.")
     console.print(
         "\n[bold]Next:[/bold] generate a trail, e.g.\n"
         "  python -m src.agent.trail_generator --idea \"how should power be limited?\"")

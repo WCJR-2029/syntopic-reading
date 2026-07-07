@@ -144,13 +144,17 @@ def build_cooccurrence_edges(db_connection, min_cooccurrence: int = 2, min_pmi: 
 
     print("\nBuilding co-occurrence graph...")
 
-    # Step 1: Get chunk-topic relationships (only canonical topics)
-    print("  Loading chunk-topic data...")
+    # Step 1: Get chunk-topic relationships, resolved to CANONICAL topics.
+    # A topic that was merged by the canonicalization pass (canonical_id set)
+    # contributes its chunk links to its canonical topic - this is what lets
+    # the same idea, worded differently across books, co-occur as ONE node.
+    # With no merged topics (canonical_id all NULL) this is identical to the
+    # old canonical-only query.
+    print("  Loading chunk-topic data (resolving aliases to canonical topics)...")
     cursor.execute("""
-        SELECT ct.chunk_id, t.id
+        SELECT ct.chunk_id, COALESCE(t.canonical_id, t.id) AS topic_id
         FROM chunk_topics ct
         JOIN topics t ON ct.topic_id = t.id
-        WHERE t.canonical_id IS NULL  -- Only canonical topics
         ORDER BY ct.chunk_id
     """)
 
@@ -167,14 +171,15 @@ def build_cooccurrence_edges(db_connection, min_cooccurrence: int = 2, min_pmi: 
     cooccurrence = analyzer.calculate_cooccurrence(chunk_topics_list)
     print(f"  Found {len(cooccurrence)} topic pairs")
 
-    # Step 3: Get topic frequencies
+    # Step 3: Get topic frequencies (also resolved through canonical_id so
+    # P(topic) counts every chunk the merged idea appears in)
     print("  Loading topic frequencies...")
     cursor.execute("""
-        SELECT t.id, COUNT(DISTINCT ct.chunk_id) as chunk_count
+        SELECT COALESCE(t.canonical_id, t.id) AS topic_id,
+               COUNT(DISTINCT ct.chunk_id) as chunk_count
         FROM topics t
         JOIN chunk_topics ct ON t.id = ct.topic_id
-        WHERE t.canonical_id IS NULL
-        GROUP BY t.id
+        GROUP BY COALESCE(t.canonical_id, t.id)
     """)
     topic_counts = {topic_id: count for topic_id, count in cursor.fetchall()}
 
