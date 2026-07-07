@@ -1,5 +1,6 @@
 """Trail Generator - Orchestrates 3-stage trail generation workflow"""
 
+import sys
 from pathlib import Path
 from typing import Optional, List, Dict
 from datetime import datetime
@@ -299,31 +300,50 @@ class TrailGenerator:
             "file_path": file_path
         }
 
-    def generate_multiple_trails(self, user_idea: Optional[str] = None, count: int = 3) -> List[Dict]:
+    def generate_multiple_trails(self, user_idea: Optional[str] = None, count: int = 3,
+                                 max_attempts: Optional[int] = None) -> List[Dict]:
         """
-        Generate multiple trails from generated ideas
+        Generate up to ``count`` trails, retrying past quality-gate rejections.
+
+        A single ideated theme clears the gate only ~3 times in 4 on a small
+        library (the sequencer occasionally over-weights one book), so a naive
+        one-idea-per-slot loop leaves ``--count 1`` failing outright a quarter of
+        the time. Here a rejected idea does NOT consume a slot: we keep drawing
+        fresh ideas until ``count`` trails are saved or ``max_attempts`` is spent.
 
         Args:
             user_idea: Optional user-provided idea (generates variations)
-            count: Number of trails to generate
+            count: Number of trails wanted
+            max_attempts: Hard cap on generation attempts (default: count*3 + 2)
 
         Returns:
-            List of trail dicts
+            List of saved trail dicts (may be shorter than ``count`` if the cap
+            is hit — a warning is printed in that case).
         """
-        print(f"\n🎯 Generating {count} trails...\n")
+        if max_attempts is None:
+            max_attempts = count * 3 + 2
+        print(f"\n🎯 Generating up to {count} trail(s) (max {max_attempts} attempts)...\n")
 
-        trails = []
+        trails: List[Dict] = []
         rejected_count = 0
-        for i in range(count):
-            trail = self.generate_trail(user_idea=user_idea, trail_index=i)
+        attempt = 0
+        while len(trails) < count and attempt < max_attempts:
+            trail = self.generate_trail(user_idea=user_idea, trail_index=attempt)
+            attempt += 1
             if trail and not trail.get("rejected"):
                 trails.append(trail)
             elif trail and trail.get("rejected"):
                 rejected_count += 1
+                if len(trails) < count and attempt < max_attempts:
+                    print(f"   ↻ Gate rejected that idea; trying another "
+                          f"({len(trails)}/{count} saved, attempt {attempt}/{max_attempts})…")
 
-        print(f"\n✅ Generated {len(trails)} trails successfully")
-        if rejected_count:
-            print(f"⚠️  {rejected_count} trail(s) rejected by quality gate")
+        print(f"\n✅ Generated {len(trails)} trail(s)"
+              + (f" (after {rejected_count} gate rejection(s))" if rejected_count else ""))
+        if len(trails) < count:
+            print(f"⚠️  Wanted {count} but only {len(trails)} cleared the gate in "
+                  f"{attempt} attempts. Try a broader --idea, add a book that bridges "
+                  f"your theme, or raise --num-ideas.")
         return trails
 
     def _save_trail(self, trail_idea: Dict, markdown: str) -> Path:
@@ -421,16 +441,13 @@ def main():
             print("ℹ️  Anchored mode generates one steered trail per run; ignoring --count.")
         trail = generator.generate_trail(user_idea=args.idea, anchor=anchor_cfg)
         trails = [trail] if trail else []
-    # Generate trails
-    elif args.count > 1:
-        trails = generator.generate_multiple_trails(user_idea=args.idea, count=args.count)
+    # Generate trails. Route ALL counts (including the default 1) through the
+    # retrying path so a single gate rejection doesn't leave the user with nothing.
     else:
-        trail = generator.generate_trail(user_idea=args.idea, trail_index=0)
-        trails = [trail] if trail else []
+        trails = generator.generate_multiple_trails(user_idea=args.idea, count=args.count)
 
     # Summary
-    saved_trails = [t for t in trails if not t.get("rejected")]
-    rejected_trails = [t for t in trails if t.get("rejected")]
+    saved_trails = [t for t in trails if t and not t.get("rejected")]
     if saved_trails:
         print("\n" + "="*80)
         print("SUMMARY")
@@ -441,10 +458,14 @@ def main():
             books = set(e['book_title'] for e in trail['excerpts'])
             print(f"   Books: {', '.join(sorted(books))}")
             print(f"   File: {trail['file_path'].name}")
-    if rejected_trails:
-        print(f"\n⚠️  {len(rejected_trails)} trail(s) rejected by quality gate")
-    if not saved_trails and not rejected_trails:
-        print("\n❌ No trails generated")
+        print(f"\n📁 Saved to: {TRAILS_DIR}/")
+    else:
+        # No trail cleared the gate. Exit non-zero so scripts/CI see the failure
+        # instead of a false success (the process used to always exit 0 here).
+        print("\n❌ No trail cleared the quality gate.")
+        print("   Try a broader --idea, add a book that bridges your theme, raise "
+              "--num-ideas, or steer it with --anchor-book \"<a book in your library>\".")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

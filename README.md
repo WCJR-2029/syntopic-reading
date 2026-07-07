@@ -129,6 +129,13 @@ free-form idea) adds: `--anchor-book "<title substring>"`, `--anchor-chunks "<cs
 (max excerpts per book, default 1). Run `python -m src.agent.trail_generator --help` for the full
 list with descriptions.
 
+**Output:** trails are written as timestamped Markdown to `data/trails/`. The generator retries
+past quality-gate rejections automatically (a few attempts per requested trail), so a single
+rejected idea won't leave you empty-handed; if nothing clears the gate it prints guidance and
+exits non-zero. On a small library a narrow question that only one or two of your books address is
+the usual reason a run comes up empty - broaden the `--idea`, add a book that bridges your theme,
+or steer it with `--anchor-book`.
+
 ## How it works
 
 ```

@@ -67,12 +67,14 @@ def main():
 
     # Final Summary
     console.print("=" * 60)
-    console.print("[bold green]Phase 3 Complete![/bold green]")
+    console.print("[bold green]✓ Topic graph built[/bold green]")
     console.print("=" * 60)
     console.print(f"Topic Graph: {graph_stats['vertices']} vertices, {graph_stats['edges']} edges")
     console.print(f"Hierarchy: {cluster_stats['total_levels']} levels")
     console.print(f"Novelty: {novelty_stats['total_topics']} topics scored")
-    console.print("\n[bold]Next: Phase 4 - CLI Tools for Claude Code Agents[/bold]")
+    console.print(
+        "\n[bold]Next:[/bold] generate a trail, e.g.\n"
+        "  python -m src.agent.trail_generator --idea \"how should power be limited?\"")
 
 
 if __name__ == "__main__":
