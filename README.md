@@ -152,13 +152,16 @@ EPUB → parse & chunk → topic extraction (your LLM) → embeddings (all-MiniL
 - **Is:** a personal thinking instrument for reading across a themed set of books; a reference
   implementation of a syntopic-reading pipeline.
 - **Isn't:** a summarizer, a replacement for reading, or useful on a single book - trails are
-  cross-book by design (the quality gate wants **≥4 books** on a shared theme).
+  cross-book by design (the quality gate wants a trail to span **several** books on a shared theme).
 
 **"No trails generated"?** The quality gate (`src/agent/trail_constraints.py`) rejects any trail
-drawing on fewer than 4 distinct books, or where a single author supplies more than 45% of the
-excerpts. A themed set of at least 5-6 books gives the tool enough range to clear that bar
-reliably; a small or single-author library will often get turned away by the diversity check
-rather than quietly produce a thin trail.
+that leans too hard on one book: it must span a minimum number of distinct books, and no single
+author may supply more than ~45-50% of the excerpts. **That minimum scales to your library size** -
+a large library (7+ books) must span at least 4 books; a small demo-sized library (4-6) needs 3.
+A themed set of at least 5-6 books on a shared question gives the tool enough range to clear the
+bar reliably; a small or single-author library, or a narrow question only one or two of your books
+actually address, will often get turned away by the diversity check rather than quietly produce a
+thin trail. If a run is rejected, try a broader question or add a book that bridges your theme.
 
 ## Status & maintenance
 
