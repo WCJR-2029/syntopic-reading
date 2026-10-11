@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # to use OpenAI or any OpenAI-compatible endpoint instead (OpenAI, OpenRouter,
 # local Ollama / LM Studio, ...).
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")
-LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-5")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-5-5")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")

@@ -156,7 +156,7 @@ EPUB → parse & chunk → topic extraction (your LLM) → embeddings (all-MiniL
 
 - **LLM:** one provider does both topic extraction and trail generation, set via `LLM_PROVIDER`
   (`anthropic` default, or `openai` for any OpenAI-compatible endpoint) and `LLM_MODEL`. Default is
-  `claude-sonnet-5`. **Cost note:** topic extraction makes one LLM call per text chunk, so on a large
+  `claude-sonnet-5-5`. **Cost note:** topic extraction makes one LLM call per text chunk, so on a large
   library the model choice matters - Sonnet is a sensible middle; drop `LLM_MODEL` to a cheaper tier
   (Haiku / a mini model) to keep ingestion affordable, or raise it (Opus / a frontier model) for the
   richest trails.

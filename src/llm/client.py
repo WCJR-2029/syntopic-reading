@@ -10,7 +10,7 @@ Configuration is read from the environment (see .env.example):
 
     LLM_PROVIDER      "anthropic" (default) | "openai"
     LLM_MODEL         model name for the configured provider
-                      (default: "claude-sonnet-5" for anthropic,
+                      (default: "claude-sonnet-5-5" for anthropic,
                        "gpt-4o-mini" for openai)
 
     # anthropic path (default — the tool runs on ONE Claude key, no Google)
@@ -40,7 +40,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEFAULT_PROVIDER = "anthropic"
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
 # Substrings (checked against str(exception).lower()) that mark a transient,

@@ -37,7 +37,7 @@ from src.readers.excerpt_repair import repair_excerpt, clean_for_reading, flatte
 from src.agent.trail_parser import parse_trail
 
 TRAILS = REPO / "data" / "trails"
-SETTINGS_MODEL = "claude-sonnet-5"   # orientation notes are not frontier work (Anthropic-only override;
+SETTINGS_MODEL = "claude-sonnet-5-5" # orientation notes are not frontier work (Anthropic-only override;
                                       # ignored under LLM_PROVIDER=openai - see settings_for_trail below)
 MAX_EXCERPT_CHARS = 1800             # cap after full-chunk recovery
 _HDR = re.compile(r"^###\s+Excerpt\s+(\d+):.*$", re.MULTILINE)
